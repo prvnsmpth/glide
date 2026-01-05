@@ -45,6 +45,14 @@ pub enum Commands {
         /// Background color (hex) or image path
         #[arg(long)]
         background: Option<String>,
+
+        /// Trim N seconds from the start of the video
+        #[arg(long, value_name = "SECONDS")]
+        trim_start: Option<f64>,
+
+        /// Trim N seconds from the end of the video
+        #[arg(long, value_name = "SECONDS")]
+        trim_end: Option<f64>,
     },
 }
 

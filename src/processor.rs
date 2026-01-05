@@ -70,6 +70,8 @@ pub fn process_video(
     input: &Path,
     output: &Path,
     background: Option<&str>,
+    trim_start: Option<f64>,
+    trim_end: Option<f64>,
 ) -> Result<()> {
     // Load metadata
     let metadata = RecordingMetadata::load(input)
@@ -85,30 +87,60 @@ pub fn process_video(
     println!("  Output: {}x{}", OUTPUT_WIDTH, OUTPUT_HEIGHT);
     println!("  Cursor events: {}", metadata.cursor_events.len());
 
+    // Get video info (fps and duration)
+    let fps = get_video_fps(input)?;
+    let original_duration = get_video_duration(input)?;
+    println!("  FPS: {:.2}", fps);
+    println!("  Original duration: {:.2}s", original_duration);
+
+    // Calculate trim parameters
+    let trim_start_secs = trim_start.unwrap_or(0.0).max(0.0);
+    let trim_end_secs = trim_end.unwrap_or(0.0).max(0.0);
+    let trimmed_duration = (original_duration - trim_start_secs - trim_end_secs).max(0.0);
+
+    if trimmed_duration <= 0.0 {
+        anyhow::bail!(
+            "Trim values ({:.2}s + {:.2}s = {:.2}s) exceed video duration ({:.2}s)",
+            trim_start_secs,
+            trim_end_secs,
+            trim_start_secs + trim_end_secs,
+            original_duration
+        );
+    }
+
+    if trim_start_secs > 0.0 || trim_end_secs > 0.0 {
+        println!(
+            "  Trimming: {:.2}s from start, {:.2}s from end",
+            trim_start_secs, trim_end_secs
+        );
+        println!("  Trimmed duration: {:.2}s", trimmed_duration);
+    }
+
     // Create temp directory for frames
     let temp_dir = TempDir::new().context("Failed to create temp directory")?;
     let frames_dir = temp_dir.path();
 
     // Extract frames (use JPEG for speed)
     println!("\nExtracting frames...");
-    let frame_count = extract_frames(input, frames_dir)?;
+    let frame_count = extract_frames(input, frames_dir, trim_start_secs, trimmed_duration)?;
     println!("  Extracted {} frames", frame_count);
-
-    // Get video info (fps and duration)
-    let fps = get_video_fps(input)?;
-    let video_duration = get_video_duration(input)?;
-    println!("  FPS: {:.2}", fps);
-    println!("  Duration: {:.2}s", video_duration);
 
     // Calculate timestamp offset for synchronization
     // If cursor tracking ran longer than video, cursor events are ahead
-    let time_offset = if metadata.cursor_tracking_duration > 0.0 {
-        metadata.cursor_tracking_duration - video_duration
+    // Also account for trim_start: cursor events need to be shifted by trim_start
+    let base_time_offset = if metadata.cursor_tracking_duration > 0.0 {
+        metadata.cursor_tracking_duration - original_duration
     } else {
         0.0 // Old recordings without this field
     };
-    if time_offset.abs() > 0.01 {
-        println!("  Time offset: {:.3}s (cursor tracking started before video)", time_offset);
+    // Add trim_start to offset since we're starting from a later point in the video
+    let time_offset = base_time_offset + trim_start_secs;
+
+    if base_time_offset.abs() > 0.01 {
+        println!(
+            "  Time offset: {:.3}s (cursor tracking started before video)",
+            base_time_offset
+        );
     }
 
     // Process frames in parallel
@@ -125,20 +157,41 @@ pub fn process_video(
     Ok(())
 }
 
-fn extract_frames(input: &Path, output_dir: &Path) -> Result<usize> {
+fn extract_frames(
+    input: &Path,
+    output_dir: &Path,
+    trim_start: f64,
+    duration: f64,
+) -> Result<usize> {
     // Use JPEG for faster extraction/encoding
     let output_pattern = output_dir.join("frame_%06d.jpg");
 
+    // Pre-format strings to avoid lifetime issues
+    let trim_start_str = format!("{:.3}", trim_start);
+    let duration_str = format!("{:.3}", duration);
+
+    let mut args = Vec::new();
+
+    // Add seek before input for faster seeking (input seeking)
+    if trim_start > 0.0 {
+        args.extend(["-ss", trim_start_str.as_str()]);
+    }
+
+    args.extend(["-i", input.to_str().unwrap()]);
+
+    // Add duration limit
+    args.extend(["-t", duration_str.as_str()]);
+
+    args.extend([
+        "-vsync",
+        "0",
+        "-q:v",
+        "2", // High quality JPEG
+    ]);
+    args.push(output_pattern.to_str().unwrap());
+
     let status = Command::new("ffmpeg")
-        .args([
-            "-i",
-            input.to_str().unwrap(),
-            "-vsync",
-            "0",
-            "-q:v",
-            "2", // High quality JPEG
-            output_pattern.to_str().unwrap(),
-        ])
+        .args(&args)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()

@@ -80,8 +80,10 @@ fn main() -> Result<()> {
             input,
             output,
             background,
+            trim_start,
+            trim_end,
         } => {
-            processor::process_video(&input, &output, background.as_deref())?;
+            processor::process_video(&input, &output, background.as_deref(), trim_start, trim_end)?;
         }
     }
 
