@@ -2,21 +2,23 @@ use crate::cursor::{CursorEvent, EventType};
 
 /// Zoom configuration
 pub struct ZoomConfig {
-    pub max_zoom: f64,      // Target zoom level (1.8x)
-    pub ease_in: f64,       // Ease in duration (0.3s)
-    pub hold: f64,          // Hold duration (2.5s)
-    pub ease_out: f64,      // Ease out duration (0.3s)
-    pub debounce: f64,      // Ignore clicks within this time of previous click
+    pub max_zoom: f64,       // Target zoom level
+    pub ease_in: f64,        // Ease in duration (anticipatory - starts before click)
+    pub hold: f64,           // Hold duration at max zoom
+    pub ease_out: f64,       // Ease out duration
+    pub debounce: f64,       // Ignore clicks within this time of previous click
+    pub pan_threshold: f64,  // Max gap between clicks to pan instead of zoom out/in
 }
 
 impl Default for ZoomConfig {
     fn default() -> Self {
         Self {
-            max_zoom: 1.5,       // Gentler zoom
-            ease_in: 0.6,        // Slower, gentler zoom in
-            hold: 2.0,           // Hold duration
-            ease_out: 0.8,       // Slow zoom out
-            debounce: 0.5,       // Ignore clicks within 0.5s of previous
+            max_zoom: 1.5,        // Gentler zoom
+            ease_in: 0.6,         // Anticipatory zoom starts 0.6s before click
+            hold: 2.0,            // Hold duration
+            ease_out: 0.8,        // Slow zoom out
+            debounce: 0.5,        // Ignore clicks within 0.5s of previous
+            pan_threshold: 3.0,   // Pan if next click within 3s
         }
     }
 }
@@ -27,124 +29,136 @@ impl ZoomConfig {
     }
 }
 
-/// Calculate zoom level and cursor position for a given timestamp
+/// Calculate zoom level and cursor position for a given timestamp.
+/// Uses anticipatory zoom (starts before click) and smart panning between nearby clicks.
 pub fn calculate_zoom(
     timestamp: f64,
     cursor_events: &[CursorEvent],
     config: &ZoomConfig,
 ) -> (f64, f64, f64) {
-    // Get all clicks before this timestamp
-    let clicks: Vec<_> = cursor_events
+    // Get all effective clicks (debounced)
+    let effective_clicks = get_effective_clicks(cursor_events, config);
+
+    // Find previous click (most recent before timestamp) and next click (first after timestamp)
+    let prev_click = effective_clicks
+        .iter()
+        .filter(|c| c.timestamp <= timestamp)
+        .last()
+        .copied();
+
+    let next_click = effective_clicks
+        .iter()
+        .find(|c| c.timestamp > timestamp)
+        .copied();
+
+    // Find current cursor position for idle state
+    let default_pos = cursor_events
         .iter()
         .filter(|e| e.timestamp <= timestamp)
-        .filter(|e| matches!(e.event_type, EventType::LeftClick | EventType::RightClick))
-        .collect();
-
-    // Find effective clicks (current and previous) for smooth transitions
-    let (prev_click, current_click) = find_effective_clicks(&clicks, config);
-
-    // Find current cursor position (most recent move/click before timestamp)
-    let current_pos = cursor_events
-        .iter()
-        .filter(|e| e.timestamp <= timestamp)
-        .last();
-
-    let default_pos = current_pos
+        .last()
         .map(|e| (e.x, e.y))
         .unwrap_or((0.0, 0.0));
 
-    match current_click {
-        Some(click) => {
-            let elapsed = timestamp - click.timestamp;
+    // Case 1: Anticipatory zoom-in (next click coming soon)
+    if let Some(next) = next_click {
+        let time_to_next = next.timestamp - timestamp;
+        if time_to_next > 0.0 && time_to_next <= config.ease_in {
+            // We're in the anticipatory zoom-in phase
+            let progress = 1.0 - (time_to_next / config.ease_in);
+            let zoom = 1.0 + (config.max_zoom - 1.0) * ease_out_cubic(progress);
 
-            // Check if we're transitioning from a previous zoom
+            // Check if we're also transitioning from a previous click (panning while zooming)
             if let Some(prev) = prev_click {
-                let prev_elapsed = timestamp - prev.timestamp;
-                let prev_zoom = calculate_zoom_level(prev_elapsed, config);
-
-                // If previous zoom is still active (not back to 1.0), blend from it
-                if prev_zoom > 1.01 && elapsed < config.ease_in {
-                    let blend_t = elapsed / config.ease_in;
-                    let blend = ease_out_cubic(blend_t);
-
-                    // Blend zoom level
-                    let target_zoom = config.max_zoom;
-                    let zoom = prev_zoom + (target_zoom - prev_zoom) * blend;
-
-                    // Blend position
-                    let cursor_x = prev.x + (click.x - prev.x) * blend;
-                    let cursor_y = prev.y + (click.y - prev.y) * blend;
-
-                    return (zoom, cursor_x, cursor_y);
+                let gap = next.timestamp - prev.timestamp;
+                if gap <= config.pan_threshold {
+                    // Pan from prev to next while zooming
+                    let x = lerp(prev.x, next.x, ease_in_out_cubic(progress));
+                    let y = lerp(prev.y, next.y, ease_in_out_cubic(progress));
+                    return (zoom.max(config.max_zoom), x, y); // Stay at max zoom during pan
                 }
             }
 
-            // Normal zoom calculation
-            let zoom = calculate_zoom_level(elapsed, config);
-            (zoom, click.x, click.y)
+            return (zoom, next.x, next.y);
         }
-        None => (1.0, default_pos.0, default_pos.1),
     }
+
+    // Case 2: Currently at/after a click
+    if let Some(prev) = prev_click {
+        let elapsed = timestamp - prev.timestamp;
+
+        // Check if we should pan to next click (staying zoomed)
+        if let Some(next) = next_click {
+            let gap = next.timestamp - prev.timestamp;
+
+            if gap <= config.pan_threshold {
+                // We're in pan mode - stay at max zoom and interpolate position
+                let time_to_next = next.timestamp - timestamp;
+
+                // During hold phase: stay at prev position
+                if elapsed <= config.hold && time_to_next > config.ease_in {
+                    return (config.max_zoom, prev.x, prev.y);
+                }
+
+                // During pan phase: interpolate from prev to next
+                // Pan starts after hold ends OR when we're within ease_in of next click
+                let pan_start_time = (prev.timestamp + config.hold).min(next.timestamp - config.ease_in);
+                if timestamp >= pan_start_time {
+                    let pan_duration = next.timestamp - pan_start_time;
+                    let pan_elapsed = timestamp - pan_start_time;
+                    let pan_progress = (pan_elapsed / pan_duration).clamp(0.0, 1.0);
+
+                    let x = lerp(prev.x, next.x, ease_in_out_cubic(pan_progress));
+                    let y = lerp(prev.y, next.y, ease_in_out_cubic(pan_progress));
+                    return (config.max_zoom, x, y);
+                }
+
+                // Still in hold phase
+                return (config.max_zoom, prev.x, prev.y);
+            }
+        }
+
+        // No upcoming click within threshold - normal hold/zoom-out behavior
+        if elapsed <= config.hold {
+            // Hold phase
+            return (config.max_zoom, prev.x, prev.y);
+        } else if elapsed <= config.hold + config.ease_out {
+            // Zoom out phase
+            let progress = (elapsed - config.hold) / config.ease_out;
+            let zoom = config.max_zoom - (config.max_zoom - 1.0) * ease_in_cubic(progress);
+            return (zoom, prev.x, prev.y);
+        }
+    }
+
+    // Case 3: Idle (no relevant clicks)
+    (1.0, default_pos.0, default_pos.1)
 }
 
-/// Find the current and previous effective clicks for smooth transitions
-fn find_effective_clicks<'a>(clicks: &[&'a CursorEvent], config: &ZoomConfig) -> (Option<&'a CursorEvent>, Option<&'a CursorEvent>) {
-    if clicks.is_empty() {
-        return (None, None);
-    }
+/// Get all effective clicks (filtered by debounce)
+fn get_effective_clicks<'a>(events: &'a [CursorEvent], config: &ZoomConfig) -> Vec<&'a CursorEvent> {
+    let clicks: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e.event_type, EventType::LeftClick | EventType::RightClick))
+        .collect();
 
-    // Walk through clicks and find effective ones
-    // A click is "effective" if it's not within debounce period of a previous effective click
-    let mut effective_clicks: Vec<&CursorEvent> = Vec::new();
+    let mut effective: Vec<&CursorEvent> = Vec::new();
 
     for click in clicks {
-        match effective_clicks.last() {
-            None => {
-                effective_clicks.push(click);
-            }
+        match effective.last() {
+            None => effective.push(click),
             Some(prev) => {
-                let time_since_prev = click.timestamp - prev.timestamp;
-                // Only accept this click if enough time has passed since the previous effective click
-                if time_since_prev > config.debounce {
-                    effective_clicks.push(click);
+                if click.timestamp - prev.timestamp > config.debounce {
+                    effective.push(click);
                 }
-                // Otherwise, ignore this click (it's part of a double-click or rapid clicking)
             }
         }
     }
 
-    let len = effective_clicks.len();
-    if len == 0 {
-        (None, None)
-    } else if len == 1 {
-        (None, Some(effective_clicks[0]))
-    } else {
-        (Some(effective_clicks[len - 2]), Some(effective_clicks[len - 1]))
-    }
+    effective
 }
 
-/// Calculate zoom level based on elapsed time since click
-fn calculate_zoom_level(elapsed: f64, config: &ZoomConfig) -> f64 {
-    let total_duration = config.total_duration();
-
-    if elapsed < 0.0 || elapsed > total_duration {
-        return 1.0;
-    }
-
-    if elapsed < config.ease_in {
-        // Zoom in: use ease-out (starts fast, ends slow) for responsive feel
-        let t = elapsed / config.ease_in;
-        let eased = ease_out_cubic(t);
-        1.0 + (config.max_zoom - 1.0) * eased
-    } else if elapsed < config.ease_in + config.hold {
-        // Hold at max zoom
-        config.max_zoom
-    } else {
-        // Zoom out: use ease-in (starts slow, ends fast) for smooth exit
-        let t = (elapsed - config.ease_in - config.hold) / config.ease_out;
-        let eased = ease_in_cubic(t);
-        config.max_zoom - (config.max_zoom - 1.0) * eased
-    }
+/// Linear interpolation
+fn lerp(a: f64, b: f64, t: f64) -> f64 {
+    a + (b - a) * t
 }
 
 /// Ease-out cubic: starts fast, ends slow (responsive)
@@ -157,76 +171,148 @@ fn ease_in_cubic(t: f64) -> f64 {
     t * t * t
 }
 
+/// Ease-in-out cubic: slow start, fast middle, slow end (smooth panning)
+fn ease_in_out_cubic(t: f64) -> f64 {
+    if t < 0.5 {
+        4.0 * t * t * t
+    } else {
+        1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn make_click(x: f64, y: f64, timestamp: f64) -> CursorEvent {
+        CursorEvent {
+            x,
+            y,
+            timestamp,
+            event_type: EventType::LeftClick,
+        }
+    }
+
     #[test]
-    fn test_zoom_timing() {
+    fn test_anticipatory_zoom_single_click() {
         let config = ZoomConfig::default();
+        // Click at t=1.0s
+        let events = vec![make_click(100.0, 100.0, 1.0)];
 
-        assert!((calculate_zoom_level(-0.1, &config) - 1.0).abs() < 0.01);
-        assert!((calculate_zoom_level(0.0, &config) - 1.0).abs() < 0.01);
+        // Before anticipatory window: should be idle (zoom=1.0)
+        let (zoom, _, _) = calculate_zoom(0.3, &events, &config);
+        assert!((zoom - 1.0).abs() < 0.01, "Should be idle before anticipatory window");
 
-        let mid_ease_in = calculate_zoom_level(0.3, &config);
-        assert!(mid_ease_in > 1.0 && mid_ease_in < config.max_zoom);
+        // During anticipatory zoom (0.4s before click)
+        let (zoom, x, y) = calculate_zoom(0.6, &events, &config);
+        assert!(zoom > 1.0 && zoom < config.max_zoom, "Should be zooming in");
+        assert!((x - 100.0).abs() < 0.01, "Should target click position");
+        assert!((y - 100.0).abs() < 0.01, "Should target click position");
 
-        // At ease_in duration, should be at max zoom
-        assert!((calculate_zoom_level(config.ease_in + 0.1, &config) - config.max_zoom).abs() < 0.01);
+        // At click moment: should be at max zoom
+        let (zoom, _, _) = calculate_zoom(1.0, &events, &config);
+        assert!((zoom - config.max_zoom).abs() < 0.01, "Should be at max zoom at click moment");
+
         // During hold
-        assert!((calculate_zoom_level(config.ease_in + 1.0, &config) - config.max_zoom).abs() < 0.01);
-        // After total duration
-        assert!((calculate_zoom_level(config.total_duration() + 1.0, &config) - 1.0).abs() < 0.01);
+        let (zoom, _, _) = calculate_zoom(2.0, &events, &config);
+        assert!((zoom - config.max_zoom).abs() < 0.01, "Should hold at max zoom");
+
+        // During zoom out
+        let (zoom, _, _) = calculate_zoom(3.5, &events, &config);
+        assert!(zoom > 1.0 && zoom < config.max_zoom, "Should be zooming out");
+
+        // After zoom out complete
+        let (zoom, _, _) = calculate_zoom(4.0, &events, &config);
+        assert!((zoom - 1.0).abs() < 0.01, "Should be back to idle");
+    }
+
+    #[test]
+    fn test_panning_between_close_clicks() {
+        let config = ZoomConfig::default();
+        // Two clicks 2.5s apart (within pan_threshold of 3.0s)
+        let events = vec![
+            make_click(100.0, 100.0, 1.0),
+            make_click(200.0, 200.0, 3.5),
+        ];
+
+        // At first click: max zoom at first position
+        let (zoom, x, y) = calculate_zoom(1.0, &events, &config);
+        assert!((zoom - config.max_zoom).abs() < 0.01);
+        assert!((x - 100.0).abs() < 0.01);
+
+        // During hold at first click
+        let (zoom, x, _) = calculate_zoom(2.0, &events, &config);
+        assert!((zoom - config.max_zoom).abs() < 0.01, "Should stay at max zoom");
+        assert!((x - 100.0).abs() < 0.01, "Should stay at first click position during hold");
+
+        // During pan phase (between hold end and second click)
+        let (zoom, x, _) = calculate_zoom(3.2, &events, &config);
+        assert!((zoom - config.max_zoom).abs() < 0.01, "Should stay at max zoom during pan");
+        assert!(x > 100.0 && x < 200.0, "Should be interpolating x position");
+
+        // At second click: max zoom at second position
+        let (zoom, x, y) = calculate_zoom(3.5, &events, &config);
+        assert!((zoom - config.max_zoom).abs() < 0.01);
+        assert!((x - 200.0).abs() < 0.01);
+        assert!((y - 200.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_zoom_out_between_far_clicks() {
+        let config = ZoomConfig::default();
+        // Two clicks 7s apart (outside pan_threshold of 3.0s)
+        let events = vec![
+            make_click(100.0, 100.0, 1.0),
+            make_click(200.0, 200.0, 8.0),
+        ];
+
+        // After first click's zoom out completes (1.0 + 2.0 hold + 0.8 ease_out = 3.8s)
+        let (zoom, _, _) = calculate_zoom(4.0, &events, &config);
+        assert!((zoom - 1.0).abs() < 0.01, "Should zoom out to idle between far clicks");
+
+        // Before second click's anticipatory zoom
+        let (zoom, _, _) = calculate_zoom(7.0, &events, &config);
+        assert!((zoom - 1.0).abs() < 0.01, "Should be idle before second click");
+
+        // During anticipatory zoom to second click
+        let (zoom, x, _) = calculate_zoom(7.6, &events, &config);
+        assert!(zoom > 1.0, "Should be zooming in to second click");
+        assert!((x - 200.0).abs() < 0.01, "Should target second click position");
     }
 
     #[test]
     fn test_double_click_debounce() {
         let config = ZoomConfig::default();
+        // Two clicks 0.1s apart (within debounce of 0.5s)
+        let events = vec![
+            make_click(100.0, 100.0, 1.0),
+            make_click(150.0, 150.0, 1.1),
+        ];
 
-        // Simulate double-click: two clicks 0.1s apart
-        let click1 = CursorEvent {
-            x: 100.0,
-            y: 100.0,
-            timestamp: 1.0,
-            event_type: EventType::LeftClick,
-        };
-        let click2 = CursorEvent {
-            x: 100.0,
-            y: 100.0,
-            timestamp: 1.1, // 0.1s after first click
-            event_type: EventType::LeftClick,
-        };
-
-        let clicks = vec![&click1, &click2];
-        let (_, current) = find_effective_clicks(&clicks, &config);
-
-        // Should use first click, ignore second (debounced)
-        assert_eq!(current.unwrap().timestamp, 1.0);
+        let effective = get_effective_clicks(&events, &config);
+        assert_eq!(effective.len(), 1, "Second click should be debounced");
+        assert!((effective[0].timestamp - 1.0).abs() < 0.01, "Should keep first click");
     }
 
     #[test]
-    fn test_smooth_transition_between_clicks() {
+    fn test_three_rapid_clicks_pan_through() {
         let config = ZoomConfig::default();
+        // Three clicks, each 2s apart (within pan_threshold)
+        let events = vec![
+            make_click(100.0, 100.0, 1.0),
+            make_click(200.0, 200.0, 3.0),
+            make_click(300.0, 300.0, 5.0),
+        ];
 
-        // Two clicks far enough apart to both be effective
-        let click1 = CursorEvent {
-            x: 100.0,
-            y: 100.0,
-            timestamp: 1.0,
-            event_type: EventType::LeftClick,
-        };
-        let click2 = CursorEvent {
-            x: 200.0,
-            y: 200.0,
-            timestamp: 2.0, // 1s after first click (after debounce)
-            event_type: EventType::LeftClick,
-        };
+        // Should stay zoomed throughout and pan between all three
+        let (zoom, _, _) = calculate_zoom(2.0, &events, &config);
+        assert!((zoom - config.max_zoom).abs() < 0.01, "Should stay zoomed");
 
-        let clicks = vec![&click1, &click2];
-        let (prev, current) = find_effective_clicks(&clicks, &config);
+        let (zoom, _, _) = calculate_zoom(4.0, &events, &config);
+        assert!((zoom - config.max_zoom).abs() < 0.01, "Should stay zoomed through second click");
 
-        // Should have both clicks as effective
-        assert_eq!(prev.unwrap().timestamp, 1.0);
-        assert_eq!(current.unwrap().timestamp, 2.0);
+        // After third click, should eventually zoom out
+        let (zoom, _, _) = calculate_zoom(8.0, &events, &config);
+        assert!((zoom - 1.0).abs() < 0.01, "Should zoom out after last click");
     }
 }
