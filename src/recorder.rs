@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
-pub fn record_display(display: &DisplayInfo, output: &Path) -> Result<()> {
+pub fn record_display(display: &DisplayInfo, output: &Path, capture_system_cursor: bool) -> Result<()> {
     // Check FFmpeg availability
     check_ffmpeg()?;
 
@@ -28,7 +28,7 @@ pub fn record_display(display: &DisplayInfo, output: &Path) -> Result<()> {
     println!("Press Ctrl+C to stop recording...\n");
 
     // Spawn FFmpeg process
-    let mut child = spawn_ffmpeg(display.avf_index, output)?;
+    let mut child = spawn_ffmpeg(display.avf_index, output, capture_system_cursor)?;
 
     // Start cursor tracking (offset will be calculated during processing)
     let mut cursor_tracker = CursorTracker::new();
@@ -97,7 +97,7 @@ pub fn record_display(display: &DisplayInfo, output: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn record_window(window: &WindowInfo, output: &Path) -> Result<()> {
+pub fn record_window(window: &WindowInfo, output: &Path, capture_system_cursor: bool) -> Result<()> {
     check_ffmpeg()?;
 
     let running = Arc::new(AtomicBool::new(true));
@@ -119,7 +119,7 @@ pub fn record_window(window: &WindowInfo, output: &Path) -> Result<()> {
     let display = displays.into_iter().find(|d| d.is_main).unwrap();
 
     // Spawn FFmpeg process
-    let mut child = spawn_ffmpeg_window(window, display.avf_index, display.scale_factor, output)?;
+    let mut child = spawn_ffmpeg_window(window, display.avf_index, display.scale_factor, output, capture_system_cursor)?;
 
     // Start cursor tracking (offset will be calculated during processing)
     let mut cursor_tracker = CursorTracker::new();
@@ -197,9 +197,10 @@ fn check_ffmpeg() -> Result<()> {
     Ok(())
 }
 
-fn spawn_ffmpeg(avf_index: usize, output: &Path) -> Result<Child> {
+fn spawn_ffmpeg(avf_index: usize, output: &Path, capture_cursor: bool) -> Result<Child> {
     // AVFoundation device index (video:audio, "none" for no audio)
     let input_device = format!("{}:none", avf_index);
+    let capture_cursor_val = if capture_cursor { "1" } else { "0" };
 
     let child = Command::new("ffmpeg")
         .args([
@@ -208,7 +209,7 @@ fn spawn_ffmpeg(avf_index: usize, output: &Path) -> Result<Child> {
             "-framerate",
             "60",
             "-capture_cursor",
-            "1",
+            capture_cursor_val,
             "-i",
             &input_device,
             "-c:v",
@@ -231,11 +232,12 @@ fn spawn_ffmpeg(avf_index: usize, output: &Path) -> Result<Child> {
     Ok(child)
 }
 
-fn spawn_ffmpeg_window(window: &WindowInfo, avf_index: usize, scale_factor: f64, output: &Path) -> Result<Child> {
+fn spawn_ffmpeg_window(window: &WindowInfo, avf_index: usize, scale_factor: f64, output: &Path, capture_cursor: bool) -> Result<Child> {
     // FFmpeg AVFoundation doesn't support direct window capture
     // So we capture the display and crop to window bounds
     // Scale coordinates for Retina displays (window bounds are in points, capture is in pixels)
     let input_device = format!("{}:none", avf_index);
+    let capture_cursor_val = if capture_cursor { "1" } else { "0" };
     let (x, y, w, h) = window.bounds;
     let scaled_x = (x as f64 * scale_factor) as i32;
     let scaled_y = (y as f64 * scale_factor) as i32;
@@ -250,7 +252,7 @@ fn spawn_ffmpeg_window(window: &WindowInfo, avf_index: usize, scale_factor: f64,
             "-framerate",
             "60",
             "-capture_cursor",
-            "1",
+            capture_cursor_val,
             "-i",
             &input_device,
             "-vf",

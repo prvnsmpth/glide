@@ -1,3 +1,4 @@
+use crate::cursor_smooth::{get_smoothed_cursor, CursorConfig};
 use crate::metadata::RecordingMetadata;
 use crate::zoom::{calculate_zoom, ZoomConfig};
 use anyhow::{Context, Result};
@@ -72,6 +73,9 @@ pub fn process_video(
     background: Option<&str>,
     trim_start: Option<f64>,
     trim_end: Option<f64>,
+    cursor_scale: f64,
+    cursor_timeout: f64,
+    no_cursor: bool,
 ) -> Result<()> {
     // Load metadata
     let metadata = RecordingMetadata::load(input)
@@ -79,6 +83,14 @@ pub fn process_video(
 
     // Parse background
     let bg = Background::parse(background)?;
+
+    // Create cursor config
+    let cursor_config = if no_cursor {
+        None
+    } else {
+        Some(CursorConfig::new(cursor_scale, cursor_timeout))
+    };
+
     println!("Processing video: {}", input.display());
     println!(
         "  Source: {:?} ({}x{})",
@@ -86,6 +98,11 @@ pub fn process_video(
     );
     println!("  Output: {}x{}", OUTPUT_WIDTH, OUTPUT_HEIGHT);
     println!("  Cursor events: {}", metadata.cursor_events.len());
+    if let Some(ref config) = cursor_config {
+        println!("  Cursor: scale={:.1}x, timeout={:.1}s", config.cursor_scale, config.inactivity_timeout);
+    } else {
+        println!("  Cursor: disabled");
+    }
 
     // Get video info (fps and duration)
     let fps = get_video_fps(input)?;
@@ -146,7 +163,7 @@ pub fn process_video(
     // Process frames in parallel
     println!("\nProcessing frames with zoom effects (parallel)...");
     let zoom_config = ZoomConfig::default();
-    process_frames_parallel(frames_dir, frame_count, fps, &metadata, &zoom_config, &bg, time_offset)?;
+    process_frames_parallel(frames_dir, frame_count, fps, &metadata, &zoom_config, &bg, time_offset, cursor_config.as_ref())?;
 
     // Re-encode
     println!("\nEncoding output video...");
@@ -440,6 +457,65 @@ fn blend_channel(bg: u8, fg: u8, alpha: u8) -> u8 {
     ((bg * (255 - alpha) + fg * alpha) / 255) as u8
 }
 
+// Embed cursor image at compile time
+const CURSOR_PNG: &[u8] = include_bytes!("../assets/cursor.png");
+
+use std::sync::OnceLock;
+
+/// Get the cursor image (loaded once, cached)
+fn get_cursor_image() -> &'static RgbaImage {
+    static CURSOR: OnceLock<RgbaImage> = OnceLock::new();
+    CURSOR.get_or_init(|| {
+        image::load_from_memory(CURSOR_PNG)
+            .expect("Failed to load embedded cursor image")
+            .to_rgba8()
+    })
+}
+
+/// Draw a cursor at the specified position
+fn draw_cursor(canvas: &mut RgbaImage, x: f64, y: f64, scale: f64, opacity: f64) {
+    let cursor = get_cursor_image();
+    let (cw, ch) = cursor.dimensions();
+
+    // Scale cursor dimensions
+    let scaled_w = (cw as f64 * scale) as u32;
+    let scaled_h = (ch as f64 * scale) as u32;
+
+    // Scale cursor image if needed
+    let scaled_cursor = if scale != 1.0 {
+        image::imageops::resize(cursor, scaled_w, scaled_h, image::imageops::FilterType::Triangle)
+    } else {
+        cursor.clone()
+    };
+
+    // Calculate position (cursor tip is at x, y)
+    let px = x as i64;
+    let py = y as i64;
+
+    // Blend cursor onto canvas with opacity
+    for cy in 0..scaled_h {
+        for cx in 0..scaled_w {
+            let canvas_x = px + cx as i64;
+            let canvas_y = py + cy as i64;
+
+            if canvas_x >= 0
+                && canvas_x < canvas.width() as i64
+                && canvas_y >= 0
+                && canvas_y < canvas.height() as i64
+            {
+                let cursor_pixel = scaled_cursor.get_pixel(cx, cy);
+                if cursor_pixel[3] > 0 {
+                    let canvas_pixel = canvas.get_pixel_mut(canvas_x as u32, canvas_y as u32);
+                    let alpha = (cursor_pixel[3] as f64 * opacity) as u8;
+                    canvas_pixel[0] = blend_channel(canvas_pixel[0], cursor_pixel[0], alpha);
+                    canvas_pixel[1] = blend_channel(canvas_pixel[1], cursor_pixel[1], alpha);
+                    canvas_pixel[2] = blend_channel(canvas_pixel[2], cursor_pixel[2], alpha);
+                }
+            }
+        }
+    }
+}
+
 fn process_frames_parallel(
     frames_dir: &Path,
     frame_count: usize,
@@ -448,6 +524,7 @@ fn process_frames_parallel(
     zoom_config: &ZoomConfig,
     background: &Background,
     time_offset: f64,
+    cursor_config: Option<&CursorConfig>,
 ) -> Result<()> {
     let pb = ProgressBar::new(frame_count as u64);
     pb.set_style(
@@ -521,6 +598,31 @@ fn process_frames_parallel(
             // Transform cursor coordinates to canvas space
             let canvas_cursor_x = layout.offset_x as f64 + window_cursor_x * layout.scale;
             let canvas_cursor_y = layout.offset_y as f64 + window_cursor_y * layout.scale;
+
+            // Draw cursor if enabled
+            if let Some(cursor_cfg) = cursor_config {
+                let cursor_state = get_smoothed_cursor(
+                    adjusted_timestamp,
+                    &metadata.cursor_events,
+                    cursor_cfg,
+                );
+
+                if cursor_state.opacity > 0.01 {
+                    // Transform smoothed cursor coordinates to canvas space
+                    let smoothed_canvas_x = layout.offset_x as f64
+                        + (cursor_state.x - offset_x as f64) * layout.scale;
+                    let smoothed_canvas_y = layout.offset_y as f64
+                        + (cursor_state.y - offset_y as f64) * layout.scale;
+
+                    draw_cursor(
+                        &mut canvas,
+                        smoothed_canvas_x,
+                        smoothed_canvas_y,
+                        cursor_cfg.cursor_scale * layout.scale,
+                        cursor_state.opacity,
+                    );
+                }
+            }
 
             let final_img = if zoom > 1.01 {
                 // Apply zoom transformation to canvas

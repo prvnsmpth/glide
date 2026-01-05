@@ -31,6 +31,10 @@ pub enum Commands {
         /// Output file path
         #[arg(short, long)]
         output: PathBuf,
+
+        /// Capture system cursor in video (default: false, custom cursor rendered during processing)
+        #[arg(long)]
+        capture_system_cursor: bool,
     },
 
     /// Process recorded video with effects
@@ -53,6 +57,18 @@ pub enum Commands {
         /// Trim N seconds from the end of the video
         #[arg(long, value_name = "SECONDS")]
         trim_end: Option<f64>,
+
+        /// Cursor scale factor (default: 1.5)
+        #[arg(long, default_value = "1.5")]
+        cursor_scale: f64,
+
+        /// Seconds of inactivity before cursor fades (default: 2.0)
+        #[arg(long, default_value = "2.0")]
+        cursor_timeout: f64,
+
+        /// Disable custom cursor rendering
+        #[arg(long)]
+        no_cursor: bool,
     },
 }
 
