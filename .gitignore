@@ -1,0 +1,15 @@
+/target
+Cargo.lock
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Test recordings
+*.mp4
+*.json

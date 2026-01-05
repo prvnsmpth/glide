@@ -1,0 +1,29 @@
+[package]
+name = "glide"
+version = "0.1.0"
+edition = "2021"
+description = "CLI screen recorder for macOS with auto-zoom on clicks"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+anyhow = "1"
+
+# macOS APIs
+core-graphics = "0.24"
+core-foundation = "0.10"
+
+# Terminal UI
+indicatif = "0.17"
+
+# Signal handling
+ctrlc = "3"
+image = "0.25.9"
+tempfile = "3.24.0"
+rayon = "1.11.0"
