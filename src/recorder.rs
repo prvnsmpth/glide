@@ -27,13 +27,10 @@ pub fn record_display(display: &DisplayInfo, output: &Path) -> Result<()> {
     println!("Recording screen to {}", output.display());
     println!("Press Ctrl+C to stop recording...\n");
 
-    // Spawn FFmpeg process first
+    // Spawn FFmpeg process
     let mut child = spawn_ffmpeg(display.avf_index, output)?;
 
-    // Small delay to let FFmpeg initialize capture
-    std::thread::sleep(std::time::Duration::from_millis(300));
-
-    // Start cursor tracking (timer starts here, synchronized with video)
+    // Start cursor tracking (offset will be calculated during processing)
     let mut cursor_tracker = CursorTracker::new();
     cursor_tracker.start()?;
 
@@ -57,7 +54,7 @@ pub fn record_display(display: &DisplayInfo, output: &Path) -> Result<()> {
             Ok(Some(status)) => {
                 if !status.success() {
                     pb.finish_and_clear();
-                    cursor_tracker.stop();
+                    let _ = cursor_tracker.stop();
                     anyhow::bail!("FFmpeg exited with error: {}", status);
                 }
                 break;
@@ -65,7 +62,7 @@ pub fn record_display(display: &DisplayInfo, output: &Path) -> Result<()> {
             Ok(None) => {} // Still running
             Err(e) => {
                 pb.finish_and_clear();
-                cursor_tracker.stop();
+                let _ = cursor_tracker.stop();
                 anyhow::bail!("Error checking FFmpeg status: {}", e);
             }
         }
@@ -73,8 +70,8 @@ pub fn record_display(display: &DisplayInfo, output: &Path) -> Result<()> {
 
     pb.finish_and_clear();
 
-    // Stop cursor tracking and get events
-    let cursor_events = cursor_tracker.stop();
+    // Stop cursor tracking and get events + duration
+    let (cursor_events, cursor_duration) = cursor_tracker.stop();
 
     // Send 'q' to FFmpeg to stop gracefully
     stop_ffmpeg(&mut child)?;
@@ -82,6 +79,7 @@ pub fn record_display(display: &DisplayInfo, output: &Path) -> Result<()> {
     // Save metadata
     let mut metadata = RecordingMetadata::new_display(display.index, display.width, display.height);
     metadata.cursor_events = cursor_events;
+    metadata.cursor_tracking_duration = cursor_duration;
     metadata.save(output)?;
 
     let duration = start.elapsed();
@@ -120,13 +118,10 @@ pub fn record_window(window: &WindowInfo, output: &Path) -> Result<()> {
     let displays = list_displays()?;
     let display = displays.into_iter().find(|d| d.is_main).unwrap();
 
-    // Spawn FFmpeg process first
+    // Spawn FFmpeg process
     let mut child = spawn_ffmpeg_window(window, display.avf_index, display.scale_factor, output)?;
 
-    // Small delay to let FFmpeg initialize capture
-    std::thread::sleep(std::time::Duration::from_millis(300));
-
-    // Start cursor tracking (timer starts here, synchronized with video)
+    // Start cursor tracking (offset will be calculated during processing)
     let mut cursor_tracker = CursorTracker::new();
     cursor_tracker.start()?;
 
@@ -147,7 +142,7 @@ pub fn record_window(window: &WindowInfo, output: &Path) -> Result<()> {
             Ok(Some(status)) => {
                 if !status.success() {
                     pb.finish_and_clear();
-                    cursor_tracker.stop();
+                    let _ = cursor_tracker.stop();
                     anyhow::bail!("FFmpeg exited with error: {}", status);
                 }
                 break;
@@ -155,7 +150,7 @@ pub fn record_window(window: &WindowInfo, output: &Path) -> Result<()> {
             Ok(None) => {}
             Err(e) => {
                 pb.finish_and_clear();
-                cursor_tracker.stop();
+                let _ = cursor_tracker.stop();
                 anyhow::bail!("Error checking FFmpeg status: {}", e);
             }
         }
@@ -163,7 +158,7 @@ pub fn record_window(window: &WindowInfo, output: &Path) -> Result<()> {
 
     pb.finish_and_clear();
 
-    let cursor_events = cursor_tracker.stop();
+    let (cursor_events, cursor_duration) = cursor_tracker.stop();
     stop_ffmpeg(&mut child)?;
 
     let mut metadata = RecordingMetadata::new_window(
@@ -174,6 +169,7 @@ pub fn record_window(window: &WindowInfo, output: &Path) -> Result<()> {
         window.bounds.1,  // y offset
     );
     metadata.cursor_events = cursor_events;
+    metadata.cursor_tracking_duration = cursor_duration;
     metadata.save(output)?;
 
     let duration = start.elapsed();

@@ -94,14 +94,27 @@ pub fn process_video(
     let frame_count = extract_frames(input, frames_dir)?;
     println!("  Extracted {} frames", frame_count);
 
-    // Get video info (fps)
+    // Get video info (fps and duration)
     let fps = get_video_fps(input)?;
+    let video_duration = get_video_duration(input)?;
     println!("  FPS: {:.2}", fps);
+    println!("  Duration: {:.2}s", video_duration);
+
+    // Calculate timestamp offset for synchronization
+    // If cursor tracking ran longer than video, cursor events are ahead
+    let time_offset = if metadata.cursor_tracking_duration > 0.0 {
+        metadata.cursor_tracking_duration - video_duration
+    } else {
+        0.0 // Old recordings without this field
+    };
+    if time_offset.abs() > 0.01 {
+        println!("  Time offset: {:.3}s (cursor tracking started before video)", time_offset);
+    }
 
     // Process frames in parallel
     println!("\nProcessing frames with zoom effects (parallel)...");
     let zoom_config = ZoomConfig::default();
-    process_frames_parallel(frames_dir, frame_count, fps, &metadata, &zoom_config, &bg)?;
+    process_frames_parallel(frames_dir, frame_count, fps, &metadata, &zoom_config, &bg, time_offset)?;
 
     // Re-encode
     println!("\nEncoding output video...");
@@ -170,6 +183,26 @@ fn get_video_fps(input: &Path) -> Result<f64> {
     } else {
         Ok(fps_str.parse().unwrap_or(60.0))
     }
+}
+
+fn get_video_duration(input: &Path) -> Result<f64> {
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "csv=p=0",
+            input.to_str().unwrap(),
+        ])
+        .output()
+        .context("Failed to run ffprobe")?;
+
+    let duration_str = String::from_utf8_lossy(&output.stdout);
+    let duration_str = duration_str.trim();
+
+    Ok(duration_str.parse().unwrap_or(0.0))
 }
 
 /// Layout info for placing content on canvas
@@ -361,6 +394,7 @@ fn process_frames_parallel(
     metadata: &RecordingMetadata,
     zoom_config: &ZoomConfig,
     background: &Background,
+    time_offset: f64,
 ) -> Result<()> {
     let pb = ProgressBar::new(frame_count as u64);
     pb.set_style(
@@ -421,8 +455,10 @@ fn process_frames_parallel(
             );
 
             // Calculate zoom for this frame
+            // Add time_offset to align cursor timestamps with video timestamps
+            let adjusted_timestamp = timestamp + time_offset;
             let (zoom, cursor_x, cursor_y) =
-                calculate_zoom(timestamp, &metadata.cursor_events, zoom_config);
+                calculate_zoom(adjusted_timestamp, &metadata.cursor_events, zoom_config);
 
             // Translate cursor from screen coordinates to window-relative coordinates
             let (offset_x, offset_y) = metadata.window_offset;

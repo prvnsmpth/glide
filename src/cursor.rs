@@ -58,7 +58,11 @@ impl CursorTracker {
         Ok(())
     }
 
-    pub fn stop(&mut self) -> Vec<CursorEvent> {
+    /// Stop tracking and return (events, tracking_duration)
+    pub fn stop(&mut self) -> (Vec<CursorEvent>, f64) {
+        // Calculate duration before stopping
+        let duration = self.start_time.elapsed().as_secs_f64();
+
         // Signal the event tap thread to stop
         if let Some(tx) = self.stop_tx.take() {
             let _ = tx.send(());
@@ -69,9 +73,9 @@ impl CursorTracker {
             let _ = handle.join();
         }
 
-        // Return collected events
+        // Return collected events and duration
         let events = self.events.lock().unwrap();
-        events.clone()
+        (events.clone(), duration)
     }
 }
 

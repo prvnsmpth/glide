@@ -19,6 +19,9 @@ pub struct RecordingMetadata {
     /// Window offset on screen (for translating cursor coordinates)
     #[serde(default)]
     pub window_offset: (i32, i32),
+    /// Duration of cursor tracking (for timestamp synchronization)
+    #[serde(default)]
+    pub cursor_tracking_duration: f64,
     pub cursor_events: Vec<CursorEvent>,
 }
 
@@ -30,6 +33,7 @@ impl RecordingMetadata {
             width,
             height,
             window_offset: (0, 0),
+            cursor_tracking_duration: 0.0,
             cursor_events: Vec::new(),
         }
     }
@@ -41,6 +45,7 @@ impl RecordingMetadata {
             width,
             height,
             window_offset: (offset_x, offset_y),
+            cursor_tracking_duration: 0.0,
             cursor_events: Vec::new(),
         }
     }
