@@ -1,4 +1,7 @@
-use crate::cursor::CursorEvent;
+use crate::macos::event_tap::CursorEvent;
+use crate::processing::effects::blend_channel;
+use image::RgbaImage;
+use std::sync::OnceLock;
 
 /// Configuration for cursor rendering and smoothing
 pub struct CursorConfig {
@@ -15,10 +18,10 @@ pub struct CursorConfig {
 impl Default for CursorConfig {
     fn default() -> Self {
         Self {
-            smooth_window: 0.15,      // 150ms smoothing window (more noticeable)
-            inactivity_timeout: 2.0,  // Fade after 2s inactivity
-            fade_duration: 0.3,       // 300ms fade animation
-            cursor_scale: 1.5,        // 1.5x cursor size
+            smooth_window: 0.15,     // 150ms smoothing window (more noticeable)
+            inactivity_timeout: 2.0, // Fade after 2s inactivity
+            fade_duration: 0.3,      // 300ms fade animation
+            cursor_scale: 1.5,       // 1.5x cursor size
         }
     }
 }
@@ -95,7 +98,11 @@ fn get_smoothed_position(
         let time_diff = event.timestamp - timestamp;
         // Gaussian weight: e^(-(t^2)/(2*sigma^2))
         // Bias towards past events slightly (less lag)
-        let adjusted_diff = if time_diff > 0.0 { time_diff * 2.0 } else { time_diff };
+        let adjusted_diff = if time_diff > 0.0 {
+            time_diff * 2.0
+        } else {
+            time_diff
+        };
         let weight = (-adjusted_diff * adjusted_diff / (2.0 * sigma * sigma)).exp();
 
         weighted_x += event.x * weight;
@@ -147,10 +154,72 @@ fn ease_out_cubic(t: f64) -> f64 {
     1.0 - (1.0 - t).powi(3)
 }
 
+// Embed cursor image at compile time
+const CURSOR_PNG: &[u8] = include_bytes!("../../assets/cursor.png");
+
+/// Get the cursor image (loaded once, cached)
+fn get_cursor_image() -> &'static RgbaImage {
+    static CURSOR: OnceLock<RgbaImage> = OnceLock::new();
+    CURSOR.get_or_init(|| {
+        image::load_from_memory(CURSOR_PNG)
+            .expect("Failed to load embedded cursor image")
+            .to_rgba8()
+    })
+}
+
+/// Draw a cursor at the specified position
+pub fn draw_cursor(canvas: &mut RgbaImage, x: f64, y: f64, scale: f64, opacity: f64) {
+    let cursor = get_cursor_image();
+    let (cw, ch) = cursor.dimensions();
+
+    // Scale cursor dimensions
+    let scaled_w = (cw as f64 * scale) as u32;
+    let scaled_h = (ch as f64 * scale) as u32;
+
+    // Scale cursor image if needed
+    let scaled_cursor = if scale != 1.0 {
+        image::imageops::resize(
+            cursor,
+            scaled_w,
+            scaled_h,
+            image::imageops::FilterType::Triangle,
+        )
+    } else {
+        cursor.clone()
+    };
+
+    // Calculate position (cursor tip is at x, y)
+    let px = x as i64;
+    let py = y as i64;
+
+    // Blend cursor onto canvas with opacity
+    for cy in 0..scaled_h {
+        for cx in 0..scaled_w {
+            let canvas_x = px + cx as i64;
+            let canvas_y = py + cy as i64;
+
+            if canvas_x >= 0
+                && canvas_x < canvas.width() as i64
+                && canvas_y >= 0
+                && canvas_y < canvas.height() as i64
+            {
+                let cursor_pixel = scaled_cursor.get_pixel(cx, cy);
+                if cursor_pixel[3] > 0 {
+                    let canvas_pixel = canvas.get_pixel_mut(canvas_x as u32, canvas_y as u32);
+                    let alpha = (cursor_pixel[3] as f64 * opacity) as u8;
+                    canvas_pixel[0] = blend_channel(canvas_pixel[0], cursor_pixel[0], alpha);
+                    canvas_pixel[1] = blend_channel(canvas_pixel[1], cursor_pixel[1], alpha);
+                    canvas_pixel[2] = blend_channel(canvas_pixel[2], cursor_pixel[2], alpha);
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cursor::EventType;
+    use crate::macos::event_tap::EventType;
 
     fn make_move(x: f64, y: f64, timestamp: f64) -> CursorEvent {
         CursorEvent {
@@ -207,7 +276,10 @@ mod tests {
 
         // During fade (2.0s timeout + some fade time)
         let state = get_smoothed_cursor(3.15, &events, &config);
-        assert!(state.opacity > 0.0 && state.opacity < 1.0, "Should be fading");
+        assert!(
+            state.opacity > 0.0 && state.opacity < 1.0,
+            "Should be fading"
+        );
     }
 
     #[test]

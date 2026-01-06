@@ -1,4 +1,4 @@
-use crate::cursor::CursorEvent;
+use crate::macos::event_tap::CursorEvent;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;

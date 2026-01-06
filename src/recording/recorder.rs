@@ -1,7 +1,5 @@
-use crate::cursor::CursorTracker;
-use crate::display::{list_displays, DisplayInfo};
-use crate::metadata::RecordingMetadata;
-use crate::window::WindowInfo;
+use crate::macos::{list_displays, CursorTracker, DisplayInfo, WindowInfo};
+use crate::recording::metadata::RecordingMetadata;
 use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::io::{BufRead, BufReader};

@@ -1,22 +1,22 @@
-use crate::cursor::{CursorEvent, EventType};
+use crate::macos::event_tap::{CursorEvent, EventType};
 
 /// Zoom configuration
 pub struct ZoomConfig {
-    pub max_zoom: f64,   // Target zoom level
-    pub ease_in: f64,    // Ease in duration (anticipatory - starts before click)
-    pub hold: f64,       // Hold duration at max zoom; also determines panning behavior
-    pub ease_out: f64,   // Ease out duration
-    pub debounce: f64,   // Ignore clicks within this time of previous click
+    pub max_zoom: f64,  // Target zoom level
+    pub ease_in: f64,   // Ease in duration (anticipatory - starts before click)
+    pub hold: f64,      // Hold duration at max zoom; also determines panning behavior
+    pub ease_out: f64,  // Ease out duration
+    pub debounce: f64,  // Ignore clicks within this time of previous click
 }
 
 impl Default for ZoomConfig {
     fn default() -> Self {
         Self {
-            max_zoom: 1.5,    // Gentler zoom
-            ease_in: 0.6,     // Anticipatory zoom starts 0.6s before click
-            hold: 4.0,        // Hold duration at max zoom
-            ease_out: 0.8,    // Slow zoom out
-            debounce: 0.5,    // Ignore clicks within 0.5s of previous
+            max_zoom: 1.5,  // Gentler zoom
+            ease_in: 0.6,   // Anticipatory zoom starts 0.6s before click
+            hold: 4.0,      // Hold duration at max zoom
+            ease_out: 0.8,  // Slow zoom out
+            debounce: 0.5,  // Ignore clicks within 0.5s of previous
         }
     }
 }
@@ -204,7 +204,10 @@ mod tests {
 
         // Before anticipatory window: should be idle (zoom=1.0)
         let (zoom, _, _) = calculate_zoom(0.3, &events, &config);
-        assert!((zoom - 1.0).abs() < 0.01, "Should be idle before anticipatory window");
+        assert!(
+            (zoom - 1.0).abs() < 0.01,
+            "Should be idle before anticipatory window"
+        );
 
         // During anticipatory zoom (0.4s before click)
         let (zoom, x, y) = calculate_zoom(0.6, &events, &config);
@@ -214,15 +217,24 @@ mod tests {
 
         // At click moment: should be at max zoom
         let (zoom, _, _) = calculate_zoom(1.0, &events, &config);
-        assert!((zoom - config.max_zoom).abs() < 0.01, "Should be at max zoom at click moment");
+        assert!(
+            (zoom - config.max_zoom).abs() < 0.01,
+            "Should be at max zoom at click moment"
+        );
 
         // During hold
         let (zoom, _, _) = calculate_zoom(3.0, &events, &config);
-        assert!((zoom - config.max_zoom).abs() < 0.01, "Should hold at max zoom");
+        assert!(
+            (zoom - config.max_zoom).abs() < 0.01,
+            "Should hold at max zoom"
+        );
 
         // During zoom out (hold ends at 1.0 + 4.0 = 5.0s)
         let (zoom, _, _) = calculate_zoom(5.5, &events, &config);
-        assert!(zoom > 1.0 && zoom < config.max_zoom, "Should be zooming out");
+        assert!(
+            zoom > 1.0 && zoom < config.max_zoom,
+            "Should be zooming out"
+        );
 
         // After zoom out complete (5.0 + 0.8 = 5.8s)
         let (zoom, _, _) = calculate_zoom(6.0, &events, &config);
@@ -246,13 +258,25 @@ mod tests {
 
         // During hold at first click
         let (zoom, x, _) = calculate_zoom(3.0, &events, &config);
-        assert!((zoom - config.max_zoom).abs() < 0.01, "Should stay at max zoom");
-        assert!((x - 100.0).abs() < 0.01, "Should stay at first click position during hold");
+        assert!(
+            (zoom - config.max_zoom).abs() < 0.01,
+            "Should stay at max zoom"
+        );
+        assert!(
+            (x - 100.0).abs() < 0.01,
+            "Should stay at first click position during hold"
+        );
 
         // During pan phase (approaching second click)
         let (zoom, x, _) = calculate_zoom(4.7, &events, &config);
-        assert!((zoom - config.max_zoom).abs() < 0.01, "Should stay at max zoom during pan");
-        assert!(x > 100.0 && x < 200.0, "Should be interpolating x position");
+        assert!(
+            (zoom - config.max_zoom).abs() < 0.01,
+            "Should stay at max zoom during pan"
+        );
+        assert!(
+            x > 100.0 && x < 200.0,
+            "Should be interpolating x position"
+        );
 
         // At second click: max zoom at second position
         let (zoom, x, y) = calculate_zoom(5.0, &events, &config);
@@ -273,7 +297,10 @@ mod tests {
 
         // After first click's zoom out completes (1.0 + 4.0 hold + 0.8 ease_out = 5.8s)
         let (zoom, _, _) = calculate_zoom(6.0, &events, &config);
-        assert!((zoom - 1.0).abs() < 0.01, "Should zoom out to idle between far clicks");
+        assert!(
+            (zoom - 1.0).abs() < 0.01,
+            "Should zoom out to idle between far clicks"
+        );
 
         // Before second click's anticipatory zoom
         let (zoom, _, _) = calculate_zoom(10.0, &events, &config);
@@ -296,7 +323,10 @@ mod tests {
 
         let effective = get_effective_clicks(&events, &config);
         assert_eq!(effective.len(), 1, "Second click should be debounced");
-        assert!((effective[0].timestamp - 1.0).abs() < 0.01, "Should keep first click");
+        assert!(
+            (effective[0].timestamp - 1.0).abs() < 0.01,
+            "Should keep first click"
+        );
     }
 
     #[test]
@@ -314,10 +344,16 @@ mod tests {
         assert!((zoom - config.max_zoom).abs() < 0.01, "Should stay zoomed");
 
         let (zoom, _, _) = calculate_zoom(5.0, &events, &config);
-        assert!((zoom - config.max_zoom).abs() < 0.01, "Should stay zoomed through second click");
+        assert!(
+            (zoom - config.max_zoom).abs() < 0.01,
+            "Should stay zoomed through second click"
+        );
 
         // After third click, should eventually zoom out (7.0 + 4.0 hold + 0.8 ease_out = 11.8s)
         let (zoom, _, _) = calculate_zoom(12.0, &events, &config);
-        assert!((zoom - 1.0).abs() < 0.01, "Should zoom out after last click");
+        assert!(
+            (zoom - 1.0).abs() < 0.01,
+            "Should zoom out after last click"
+        );
     }
 }
