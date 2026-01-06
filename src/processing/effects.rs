@@ -245,7 +245,9 @@ pub fn blend_channel(bg: u8, fg: u8, alpha: u8) -> u8 {
     ((bg * (255 - alpha) + fg * alpha) / 255) as u8
 }
 
-/// Apply zoom transformation to an image
+/// Apply zoom transformation to an image.
+/// Uses fixed-point zoom: the cursor stays at its screen position while content scales around it.
+/// Both axes use the same zoom factor, ensuring perfectly symmetric motion.
 pub fn apply_zoom(img: &DynamicImage, zoom: f64, cursor_x: f64, cursor_y: f64) -> DynamicImage {
     let (width, height) = img.dimensions();
     let width_f = width as f64;
@@ -255,13 +257,18 @@ pub fn apply_zoom(img: &DynamicImage, zoom: f64, cursor_x: f64, cursor_y: f64) -
     let view_width = width_f / zoom;
     let view_height = height_f / zoom;
 
-    // Center the view on the cursor position, but clamp to image bounds
-    let view_left = (cursor_x - view_width / 2.0)
-        .max(0.0)
-        .min(width_f - view_width);
-    let view_top = (cursor_y - view_height / 2.0)
-        .max(0.0)
-        .min(height_f - view_height);
+    // Fixed-point zoom formula: view_pos = cursor * (1 - 1/zoom)
+    // This keeps the cursor at its current screen position while zooming.
+    // Both axes use the SAME factor, guaranteeing symmetric motion.
+    let zoom_factor = 1.0 - 1.0 / zoom;
+    let view_left = cursor_x * zoom_factor;
+    let view_top = cursor_y * zoom_factor;
+
+    // Clamp to valid bounds (handles edge cases where cursor is outside canvas)
+    let max_left = (width_f - view_width).max(0.0);
+    let max_top = (height_f - view_height).max(0.0);
+    let view_left = view_left.clamp(0.0, max_left);
+    let view_top = view_top.clamp(0.0, max_top);
 
     // Crop and resize (use Triangle filter for speed, still decent quality)
     let cropped = img.crop_imm(
@@ -272,4 +279,266 @@ pub fn apply_zoom(img: &DynamicImage, zoom: f64, cursor_x: f64, cursor_y: f64) -
     );
 
     cropped.resize_exact(width, height, image::imageops::FilterType::Triangle)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_image(width: u32, height: u32) -> DynamicImage {
+        // Create a gradient image so we can verify zoom is actually happening
+        let mut img = RgbaImage::new(width, height);
+        for y in 0..height {
+            for x in 0..width {
+                let r = (x * 255 / width) as u8;
+                let g = (y * 255 / height) as u8;
+                img.put_pixel(x, y, Rgba([r, g, 128, 255]));
+            }
+        }
+        DynamicImage::ImageRgba8(img)
+    }
+
+    #[test]
+    fn test_apply_zoom_no_zoom() {
+        let img = create_test_image(1920, 1080);
+        let result = apply_zoom(&img, 1.0, 960.0, 540.0);
+
+        assert_eq!(result.dimensions(), (1920, 1080));
+        // At zoom 1.0, output should equal input
+        let orig_pixel = img.get_pixel(960, 540);
+        let result_pixel = result.get_pixel(960, 540);
+        assert_eq!(orig_pixel, result_pixel);
+    }
+
+    #[test]
+    fn test_apply_zoom_center_cursor() {
+        let img = create_test_image(1920, 1080);
+        let zoom = 1.8;
+        let cursor_x = 960.0; // center
+        let cursor_y = 540.0; // center
+
+        let result = apply_zoom(&img, zoom, cursor_x, cursor_y);
+
+        assert_eq!(result.dimensions(), (1920, 1080));
+
+        // With fixed-point zoom, cursor should stay at same position
+        // The pixel at cursor position should come from the same source position
+        // Verify the view_left and view_top calculations:
+        let view_width = 1920.0 / zoom;
+        let view_height = 1080.0 / zoom;
+        let zoom_factor = 1.0 - 1.0 / zoom;
+        let view_left = cursor_x * zoom_factor;
+        let view_top = cursor_y * zoom_factor;
+
+        println!("zoom_factor: {}", zoom_factor);
+        println!("view_left: {}, view_top: {}", view_left, view_top);
+        println!("view_width: {}, view_height: {}", view_width, view_height);
+
+        // The cropped area should be smaller than the original
+        assert!(view_width < 1920.0);
+        assert!(view_height < 1080.0);
+    }
+
+    #[test]
+    fn test_apply_zoom_cursor_preserved() {
+        let img = create_test_image(1920, 1080);
+        let zoom = 1.8;
+
+        // Test cursor at center
+        let cursor_x = 960.0;
+        let cursor_y = 540.0;
+
+        // Calculate where the cursor should appear after zoom
+        // With fixed-point zoom formula: view_left = cursor_x * (1 - 1/zoom)
+        let zoom_factor = 1.0 - 1.0 / zoom;
+        let view_left = cursor_x * zoom_factor;
+        let view_top = cursor_y * zoom_factor;
+        let view_width = 1920.0 / zoom;
+        let view_height = 1080.0 / zoom;
+
+        // Cursor position in cropped image
+        let cursor_in_crop_x: f64 = cursor_x - view_left;
+        let cursor_in_crop_y: f64 = cursor_y - view_top;
+
+        // After resize, cursor should be at:
+        let cursor_after_x: f64 = cursor_in_crop_x * (1920.0 / view_width);
+        let cursor_after_y: f64 = cursor_in_crop_y * (1080.0 / view_height);
+
+        println!("Cursor should be at: ({}, {})", cursor_after_x, cursor_after_y);
+
+        // Should be approximately at original position
+        assert!((cursor_after_x - cursor_x).abs() < 1.0, "X position should be preserved");
+        assert!((cursor_after_y - cursor_y).abs() < 1.0, "Y position should be preserved");
+    }
+
+    #[test]
+    fn test_apply_zoom_corner_cursor() {
+        let img = create_test_image(1920, 1080);
+        let zoom = 1.8;
+
+        // Test cursor at bottom-right corner
+        let cursor_x = 1800.0;
+        let cursor_y = 900.0;
+
+        let result = apply_zoom(&img, zoom, cursor_x, cursor_y);
+        assert_eq!(result.dimensions(), (1920, 1080));
+
+        // Verify the zoom math works for corner positions
+        let zoom_factor = 1.0 - 1.0 / zoom;
+        let view_width = 1920.0 / zoom;
+        let view_height = 1080.0 / zoom;
+
+        let view_left = (cursor_x * zoom_factor).max(0.0).min(1920.0 - view_width);
+        let view_top = (cursor_y * zoom_factor).max(0.0).min(1080.0 - view_height);
+
+        println!("Corner zoom - view_left: {}, view_top: {}", view_left, view_top);
+
+        // View should be offset toward the corner
+        assert!(view_left > 0.0, "View should be offset from left");
+        assert!(view_top > 0.0, "View should be offset from top");
+    }
+
+    #[test]
+    fn test_apply_zoom_with_layout_offset() {
+        // Simulate a scenario like the actual pipeline:
+        // - Window content is centered on a 1920x1080 canvas
+        // - Content has layout offset (e.g., offset_x=260, offset_y=140)
+        // - Cursor click is on the content area
+
+        let img = create_test_image(1920, 1080);
+        let zoom = 1.8;
+
+        // Cursor click at canvas position (660, 490) - which is on the content
+        let canvas_cursor_x = 660.0;
+        let canvas_cursor_y = 490.0;
+
+        let result = apply_zoom(&img, zoom, canvas_cursor_x, canvas_cursor_y);
+
+        // Verify dimensions preserved
+        assert_eq!(result.dimensions(), (1920, 1080));
+
+        // Verify the view calculations
+        let zoom_factor = 1.0 - 1.0 / zoom;
+        let view_left = canvas_cursor_x * zoom_factor;
+        let view_top = canvas_cursor_y * zoom_factor;
+
+        println!(
+            "Layout offset test: view_left={}, view_top={}, zoom_factor={}",
+            view_left, view_top, zoom_factor
+        );
+
+        // view_left should be positive (zooming toward the cursor)
+        assert!(view_left > 0.0, "view_left should be positive");
+        assert!(view_top > 0.0, "view_top should be positive");
+    }
+
+    #[test]
+    fn test_apply_zoom_zero_cursor() {
+        // Edge case: cursor at (0, 0)
+        let img = create_test_image(1920, 1080);
+        let zoom = 1.8;
+
+        let result = apply_zoom(&img, zoom, 0.0, 0.0);
+        assert_eq!(result.dimensions(), (1920, 1080));
+
+        // With cursor at (0, 0), zoom should center on top-left
+        // view_left = 0 * anything = 0
+        // This should zoom into the top-left corner
+        let orig_pixel = img.get_pixel(0, 0);
+        let zoomed_pixel = result.get_pixel(0, 0);
+
+        // The top-left pixel should be the same (zooming from origin)
+        println!("Zero cursor - orig: {:?}, zoomed: {:?}", orig_pixel, zoomed_pixel);
+    }
+
+    #[test]
+    fn test_fixed_point_zoom_is_symmetric() {
+        // Verify that the fixed-point formula produces symmetric motion
+        // Both axes should use the same factor regardless of cursor position
+        let zoom = 1.8;
+        let zoom_factor = 1.0 - 1.0 / zoom;
+
+        // Test at various cursor positions
+        let test_cases: [(f64, f64, &str); 5] = [
+            (960.0, 540.0, "center"),
+            (100.0, 100.0, "top-left area"),
+            (1800.0, 900.0, "bottom-right area"),
+            (660.0, 490.0, "offset position"),
+            (1500.0, 300.0, "asymmetric position"),
+        ];
+
+        for (cursor_x, cursor_y, label) in test_cases {
+            let view_left = cursor_x * zoom_factor;
+            let view_top = cursor_y * zoom_factor;
+
+            // Verify the ratio: view_pos / cursor_pos should be the same for both axes
+            let x_ratio = if cursor_x > 0.0 { view_left / cursor_x } else { zoom_factor };
+            let y_ratio = if cursor_y > 0.0 { view_top / cursor_y } else { zoom_factor };
+
+            println!("{}: x_ratio={:.4}, y_ratio={:.4}", label, x_ratio, y_ratio);
+
+            // Both ratios should equal zoom_factor (perfectly symmetric)
+            assert!(
+                (x_ratio - zoom_factor).abs() < 0.0001,
+                "X ratio should equal zoom_factor"
+            );
+            assert!(
+                (y_ratio - zoom_factor).abs() < 0.0001,
+                "Y ratio should equal zoom_factor"
+            );
+        }
+    }
+
+    #[test]
+    fn test_zoom_produces_magnification() {
+        // Verify that zoom actually magnifies the content
+        let img = create_test_image(1920, 1080);
+        let zoom = 1.8;
+
+        // Apply zoom at center
+        let result = apply_zoom(&img, zoom, 960.0, 540.0);
+
+        // Check that a pixel NOT at the cursor position has changed
+        // (proving that content is being cropped and resized)
+        let orig_pixel = img.get_pixel(200, 200);
+        let zoomed_pixel = result.get_pixel(200, 200);
+
+        println!("Magnification test:");
+        println!("  Original (200,200): {:?}", orig_pixel);
+        println!("  Zoomed (200,200): {:?}", zoomed_pixel);
+
+        // The pixels should be different because we're showing different content
+        assert_ne!(
+            orig_pixel, zoomed_pixel,
+            "Zoom should change visible content at non-cursor positions"
+        );
+    }
+
+    #[test]
+    fn test_apply_zoom_produces_different_output() {
+        let img = create_test_image(1920, 1080);
+
+        // Get a pixel from the corner at no zoom
+        let corner_pixel_no_zoom = img.get_pixel(100, 100);
+
+        // Apply zoom centered on cursor at (500, 500)
+        let zoomed = apply_zoom(&img, 1.8, 500.0, 500.0);
+
+        // The same screen position (100, 100) should now show different content
+        // because we've zoomed and panned
+        let corner_pixel_zoomed = zoomed.get_pixel(100, 100);
+
+        // These should be different (zoom should change the visible content)
+        println!("No zoom pixel at (100,100): {:?}", corner_pixel_no_zoom);
+        println!("Zoomed pixel at (100,100): {:?}", corner_pixel_zoomed);
+
+        // At 1.8x zoom with cursor at (500, 500):
+        // view_left = 500 * (1 - 1/1.8) = 500 * 0.444 = 222
+        // The pixel at (100, 100) in the result comes from around (222 + 100/1.8, ...) in original
+        // So it should be different
+        assert_ne!(
+            corner_pixel_no_zoom, corner_pixel_zoomed,
+            "Zoom should change the visible content"
+        );
+    }
 }

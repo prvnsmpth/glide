@@ -12,7 +12,7 @@ pub struct ZoomConfig {
 impl Default for ZoomConfig {
     fn default() -> Self {
         Self {
-            max_zoom: 1.5,  // Gentler zoom
+            max_zoom: 1.8,  // More prominent zoom for better visibility
             ease_in: 0.6,   // Anticipatory zoom starts 0.6s before click
             hold: 4.0,      // Hold duration at max zoom
             ease_out: 0.8,  // Slow zoom out
