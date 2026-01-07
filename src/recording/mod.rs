@@ -1,3 +1,5 @@
+pub mod capture;
+pub mod encoder;
 pub mod metadata;
 pub mod recorder;
 
