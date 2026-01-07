@@ -176,3 +176,7 @@ glide process demo.mp4 -o final.mp4 --background gradient.png  # With image
 - Cursor enhancement
 - MP4 export
 - Progress indicators
+
+# Git Commit
+
+- Always make commits with a simple, short, single-line commit message (subject only, no description required)

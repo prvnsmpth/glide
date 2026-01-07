@@ -69,6 +69,10 @@ pub enum Commands {
         /// Disable custom cursor rendering
         #[arg(long)]
         no_cursor: bool,
+
+        /// Disable motion blur during zoom/pan transitions
+        #[arg(long)]
+        no_motion_blur: bool,
     },
 }
 

@@ -85,6 +85,7 @@ fn main() -> Result<()> {
             cursor_scale,
             cursor_timeout,
             no_cursor,
+            no_motion_blur,
         } => {
             process_video(
                 &input,
@@ -95,6 +96,7 @@ fn main() -> Result<()> {
                 cursor_scale,
                 cursor_timeout,
                 no_cursor,
+                no_motion_blur,
             )?;
         }
     }

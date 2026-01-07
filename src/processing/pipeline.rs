@@ -4,6 +4,7 @@ use crate::processing::effects::{
     OUTPUT_HEIGHT, OUTPUT_WIDTH,
 };
 use crate::processing::frames::{encode_video, extract_frames, get_video_duration};
+use crate::processing::motion_blur::{apply_motion_blur, calculate_motion_state, MotionBlurConfig};
 use crate::processing::zoom::{calculate_zoom, ZoomConfig};
 use crate::recording::metadata::RecordingMetadata;
 use anyhow::{Context, Result};
@@ -23,6 +24,7 @@ pub fn process_video(
     cursor_scale: f64,
     cursor_timeout: f64,
     no_cursor: bool,
+    no_motion_blur: bool,
 ) -> Result<()> {
     // Load metadata
     let metadata = RecordingMetadata::load(input)
@@ -36,6 +38,12 @@ pub fn process_video(
         None
     } else {
         Some(CursorConfig::new(cursor_scale, cursor_timeout))
+    };
+
+    // Create motion blur config
+    let motion_blur_config = MotionBlurConfig {
+        enabled: !no_motion_blur,
+        ..Default::default()
     };
 
     println!("Processing video: {}", input.display());
@@ -53,6 +61,14 @@ pub fn process_video(
     } else {
         println!("  Cursor: disabled");
     }
+    println!(
+        "  Motion blur: {}",
+        if motion_blur_config.enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
 
     // Get video duration
     let original_duration = get_video_duration(input)?;
@@ -135,6 +151,7 @@ pub fn process_video(
         &bg,
         time_offset,
         cursor_config.as_ref(),
+        &motion_blur_config,
     )?;
 
     // Encode the generated 60fps frames
@@ -157,6 +174,7 @@ fn process_frames_parallel(
     background: &Background,
     time_offset: f64,
     cursor_config: Option<&CursorConfig>,
+    motion_blur_config: &MotionBlurConfig,
 ) -> Result<()> {
     let pb = ProgressBar::new(output_frame_count as u64);
     pb.set_style(
@@ -277,7 +295,7 @@ fn process_frames_parallel(
                 }
             }
 
-            let final_img = if zoom > 1.01 {
+            let zoomed_img = if zoom > 1.01 {
                 // Apply zoom transformation to canvas
                 apply_zoom(
                     &DynamicImage::ImageRgba8(canvas),
@@ -287,6 +305,22 @@ fn process_frames_parallel(
                 )
             } else {
                 DynamicImage::ImageRgba8(canvas)
+            };
+
+            // Apply motion blur during zoom/pan transitions
+            let final_img = if motion_blur_config.enabled {
+                let motion_state = calculate_motion_state(
+                    adjusted_timestamp,
+                    &metadata.cursor_events,
+                    zoom_config,
+                    &layout,
+                    metadata.window_offset,
+                    scale_factor,
+                );
+                let blurred = apply_motion_blur(&zoomed_img.to_rgba8(), &motion_state, motion_blur_config);
+                DynamicImage::ImageRgba8(blurred)
+            } else {
+                zoomed_img
             };
 
             // Save processed frame

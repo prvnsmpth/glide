@@ -1,6 +1,7 @@
 pub mod cursor;
 pub mod effects;
 pub mod frames;
+pub mod motion_blur;
 pub mod pipeline;
 pub mod zoom;
 
