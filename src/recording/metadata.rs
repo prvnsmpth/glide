@@ -10,6 +10,10 @@ pub enum SourceType {
     Window,
 }
 
+fn default_scale_factor() -> f64 {
+    1.0
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordingMetadata {
     pub source_type: SourceType,
@@ -22,11 +26,15 @@ pub struct RecordingMetadata {
     /// Duration of cursor tracking (for timestamp synchronization)
     #[serde(default)]
     pub cursor_tracking_duration: f64,
+    /// Display scale factor (1.0 for standard, 2.0 for Retina)
+    /// Used to convert cursor coordinates from screen points to pixels
+    #[serde(default = "default_scale_factor")]
+    pub scale_factor: f64,
     pub cursor_events: Vec<CursorEvent>,
 }
 
 impl RecordingMetadata {
-    pub fn new_display(index: usize, width: u32, height: u32) -> Self {
+    pub fn new_display(index: usize, width: u32, height: u32, scale_factor: f64) -> Self {
         Self {
             source_type: SourceType::Display,
             source_index: index,
@@ -34,11 +42,12 @@ impl RecordingMetadata {
             height,
             window_offset: (0, 0),
             cursor_tracking_duration: 0.0,
+            scale_factor,
             cursor_events: Vec::new(),
         }
     }
 
-    pub fn new_window(window_id: u32, width: u32, height: u32, offset_x: i32, offset_y: i32) -> Self {
+    pub fn new_window(window_id: u32, width: u32, height: u32, offset_x: i32, offset_y: i32, scale_factor: f64) -> Self {
         Self {
             source_type: SourceType::Window,
             source_index: window_id as usize,
@@ -46,6 +55,7 @@ impl RecordingMetadata {
             height,
             window_offset: (offset_x, offset_y),
             cursor_tracking_duration: 0.0,
+            scale_factor,
             cursor_events: Vec::new(),
         }
     }

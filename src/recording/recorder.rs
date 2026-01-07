@@ -125,7 +125,7 @@ pub fn record_display(display: &DisplayInfo, output: &Path, capture_system_curso
     );
 
     // Save metadata
-    let mut metadata = RecordingMetadata::new_display(display.index, actual_width, actual_height);
+    let mut metadata = RecordingMetadata::new_display(display.index, actual_width, actual_height, display.scale_factor);
     metadata.cursor_events = cursor_events;
     metadata.cursor_tracking_duration = cursor_duration;
     metadata.save(output)?;
@@ -264,6 +264,7 @@ pub fn record_window(window: &WindowInfo, output: &Path, capture_system_cursor: 
         actual_height,
         window.bounds.0,  // x offset
         window.bounds.1,  // y offset
+        display.scale_factor,
     );
     metadata.cursor_events = cursor_events;
     metadata.cursor_tracking_duration = cursor_duration;

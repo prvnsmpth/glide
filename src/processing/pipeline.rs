@@ -3,7 +3,7 @@ use crate::processing::effects::{
     apply_rounded_corners, apply_zoom, draw_shadow, Background, ContentLayout, CORNER_RADIUS,
     OUTPUT_HEIGHT, OUTPUT_WIDTH,
 };
-use crate::processing::frames::{encode_video, extract_frames, get_video_duration, get_video_fps};
+use crate::processing::frames::{encode_video, extract_frames, get_video_duration};
 use crate::processing::zoom::{calculate_zoom, ZoomConfig};
 use crate::recording::metadata::RecordingMetadata;
 use anyhow::{Context, Result};
@@ -54,10 +54,8 @@ pub fn process_video(
         println!("  Cursor: disabled");
     }
 
-    // Get video info (fps and duration)
-    let fps = get_video_fps(input)?;
+    // Get video duration
     let original_duration = get_video_duration(input)?;
-    println!("  FPS: {:.2}", fps);
     println!("  Original duration: {:.2}s", original_duration);
 
     // Calculate trim parameters
@@ -92,6 +90,19 @@ pub fn process_video(
     let frame_count = extract_frames(input, frames_dir, trim_start_secs, trimmed_duration)?;
     println!("  Extracted {} frames", frame_count);
 
+    // Calculate source FPS from extracted frames
+    let source_fps = if trimmed_duration > 0.0 {
+        frame_count as f64 / trimmed_duration
+    } else {
+        30.0 // fallback
+    };
+    println!("  Source FPS: {:.2}", source_fps);
+
+    // Target 60fps for smooth animations
+    let target_fps = 60.0;
+    let output_frame_count = (trimmed_duration * target_fps).ceil() as usize;
+    println!("  Output: {} frames at {:.0}fps", output_frame_count, target_fps);
+
     // Calculate timestamp offset for synchronization
     // If cursor tracking ran longer than video, cursor events are ahead
     // Also account for trim_start: cursor events need to be shifted by trim_start
@@ -110,13 +121,15 @@ pub fn process_video(
         );
     }
 
-    // Process frames in parallel
+    // Process frames in parallel - generate 60fps output with smooth zoom/cursor
     println!("\nProcessing frames with zoom effects (parallel)...");
     let zoom_config = ZoomConfig::default();
     process_frames_parallel(
         frames_dir,
         frame_count,
-        fps,
+        output_frame_count,
+        source_fps,
+        target_fps,
         &metadata,
         &zoom_config,
         &bg,
@@ -124,9 +137,9 @@ pub fn process_video(
         cursor_config.as_ref(),
     )?;
 
-    // Re-encode
+    // Encode the generated 60fps frames
     println!("\nEncoding output video...");
-    encode_video(frames_dir, output, fps)?;
+    encode_video(frames_dir, output, target_fps, target_fps)?;
 
     println!("\nDone! Output saved to: {}", output.display());
 
@@ -135,15 +148,17 @@ pub fn process_video(
 
 fn process_frames_parallel(
     frames_dir: &Path,
-    frame_count: usize,
-    fps: f64,
+    source_frame_count: usize,
+    output_frame_count: usize,
+    source_fps: f64,
+    target_fps: f64,
     metadata: &RecordingMetadata,
     zoom_config: &ZoomConfig,
     background: &Background,
     time_offset: f64,
     cursor_config: Option<&CursorConfig>,
 ) -> Result<()> {
-    let pb = ProgressBar::new(frame_count as u64);
+    let pb = ProgressBar::new(output_frame_count as u64);
     pb.set_style(
         ProgressStyle::default_bar()
             .template("{spinner:.green} [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
@@ -158,16 +173,28 @@ fn process_frames_parallel(
     let layout = ContentLayout::calculate(metadata.width, metadata.height);
     let background = background.clone();
 
-    // Process frames in parallel using rayon
-    let results: Vec<Result<()>> = (1..=frame_count)
-        .into_par_iter()
-        .map(|frame_num| {
-            let frame_path = frames_dir.join(format!("frame_{:06}.jpg", frame_num));
-            let timestamp = (frame_num - 1) as f64 / fps;
+    // Pre-load all source frames for faster access
+    println!("  Loading source frames...");
+    let source_frames: Vec<_> = (1..=source_frame_count)
+        .map(|i| {
+            let path = frames_dir.join(format!("frame_{:06}.png", i));
+            image::open(&path).expect("Failed to load source frame")
+        })
+        .collect();
 
-            // Load content frame
-            let content = image::open(&frame_path)
-                .with_context(|| format!("Failed to open frame {}", frame_num))?;
+    // Generate output frames at target fps with smooth zoom/cursor interpolation
+    let results: Vec<Result<()>> = (1..=output_frame_count)
+        .into_par_iter()
+        .map(|output_frame_num| {
+            // Calculate timestamp for this output frame
+            let timestamp = (output_frame_num - 1) as f64 / target_fps;
+
+            // Find the corresponding source frame (nearest neighbor)
+            let source_idx = ((timestamp * source_fps).floor() as usize).min(source_frame_count - 1);
+            let content = &source_frames[source_idx];
+
+            // Output frame path (new numbering for 60fps output)
+            let output_path = frames_dir.join(format!("out_{:06}.png", output_frame_num));
 
             // Create canvas with background
             let mut canvas = background.create_canvas();
@@ -207,10 +234,21 @@ fn process_frames_parallel(
             let (zoom, cursor_x, cursor_y) =
                 calculate_zoom(adjusted_timestamp, &metadata.cursor_events, zoom_config);
 
+            // Get scale factor for coordinate conversion (screen points -> pixels)
+            // CGEventTap returns screen points, but video is captured at pixel resolution
+            let scale_factor = metadata.scale_factor.max(1.0);
+
+            // Scale cursor coordinates from screen points to pixels
+            let cursor_x_scaled = cursor_x * scale_factor;
+            let cursor_y_scaled = cursor_y * scale_factor;
+
             // Translate cursor from screen coordinates to window-relative coordinates
+            // Window offset is also in screen points, so scale it too
             let (offset_x, offset_y) = metadata.window_offset;
-            let window_cursor_x = cursor_x - offset_x as f64;
-            let window_cursor_y = cursor_y - offset_y as f64;
+            let offset_x_scaled = offset_x as f64 * scale_factor;
+            let offset_y_scaled = offset_y as f64 * scale_factor;
+            let window_cursor_x = cursor_x_scaled - offset_x_scaled;
+            let window_cursor_y = cursor_y_scaled - offset_y_scaled;
 
             // Transform cursor coordinates to canvas space
             let canvas_cursor_x = layout.offset_x as f64 + window_cursor_x * layout.scale;
@@ -223,10 +261,11 @@ fn process_frames_parallel(
 
                 if cursor_state.opacity > 0.01 {
                     // Transform smoothed cursor coordinates to canvas space
+                    // Apply scale_factor to convert from screen points to pixels
                     let smoothed_canvas_x =
-                        layout.offset_x as f64 + (cursor_state.x - offset_x as f64) * layout.scale;
+                        layout.offset_x as f64 + (cursor_state.x * scale_factor - offset_x_scaled) * layout.scale;
                     let smoothed_canvas_y =
-                        layout.offset_y as f64 + (cursor_state.y - offset_y as f64) * layout.scale;
+                        layout.offset_y as f64 + (cursor_state.y * scale_factor - offset_y_scaled) * layout.scale;
 
                     draw_cursor(
                         &mut canvas,
@@ -252,8 +291,8 @@ fn process_frames_parallel(
 
             // Save processed frame
             final_img
-                .save(&frame_path)
-                .with_context(|| format!("Failed to save frame {}", frame_num))?;
+                .save(&output_path)
+                .with_context(|| format!("Failed to save frame {}", output_frame_num))?;
 
             let count = processed.fetch_add(1, Ordering::Relaxed);
             if count % 10 == 0 {
