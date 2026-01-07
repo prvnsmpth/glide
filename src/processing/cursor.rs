@@ -21,7 +21,7 @@ impl Default for CursorConfig {
             smooth_window: 0.15,     // 150ms smoothing window (more noticeable)
             inactivity_timeout: 2.0, // Fade after 2s inactivity
             fade_duration: 0.3,      // 300ms fade animation
-            cursor_scale: 1.5,       // 1.5x cursor size
+            cursor_scale: 2.0,       // 2.0x cursor size
         }
     }
 }
@@ -167,7 +167,13 @@ fn get_cursor_image() -> &'static RgbaImage {
     })
 }
 
-/// Draw a cursor at the specified position
+// Cursor shadow settings
+const CURSOR_SHADOW_OFFSET_X: i64 = 2;
+const CURSOR_SHADOW_OFFSET_Y: i64 = 3;
+const CURSOR_SHADOW_BLUR_PASSES: u32 = 3;
+const CURSOR_SHADOW_OPACITY: f64 = 0.5;
+
+/// Draw a cursor at the specified position with shadow
 pub fn draw_cursor(canvas: &mut RgbaImage, x: f64, y: f64, scale: f64, opacity: f64) {
     let cursor = get_cursor_image();
     let (cw, ch) = cursor.dimensions();
@@ -176,13 +182,13 @@ pub fn draw_cursor(canvas: &mut RgbaImage, x: f64, y: f64, scale: f64, opacity: 
     let scaled_w = (cw as f64 * scale) as u32;
     let scaled_h = (ch as f64 * scale) as u32;
 
-    // Scale cursor image if needed
+    // Scale cursor image if needed (use Lanczos3 for high quality)
     let scaled_cursor = if scale != 1.0 {
         image::imageops::resize(
             cursor,
             scaled_w,
             scaled_h,
-            image::imageops::FilterType::Triangle,
+            image::imageops::FilterType::Lanczos3,
         )
     } else {
         cursor.clone()
@@ -192,7 +198,45 @@ pub fn draw_cursor(canvas: &mut RgbaImage, x: f64, y: f64, scale: f64, opacity: 
     let px = x as i64;
     let py = y as i64;
 
-    // Blend cursor onto canvas with opacity
+    // Draw shadow first (multiple passes for blur effect)
+    let shadow_opacity = opacity * CURSOR_SHADOW_OPACITY;
+    for pass in 0..=CURSOR_SHADOW_BLUR_PASSES {
+        let blur_expand = pass as i64;
+        let pass_opacity = shadow_opacity * (CURSOR_SHADOW_BLUR_PASSES - pass + 1) as f64
+            / (CURSOR_SHADOW_BLUR_PASSES + 1) as f64;
+
+        for cy in 0..scaled_h {
+            for cx in 0..scaled_w {
+                let cursor_pixel = scaled_cursor.get_pixel(cx, cy);
+                if cursor_pixel[3] < 128 {
+                    continue; // Only shadow from visible parts
+                }
+
+                // Draw shadow with offset and blur expansion
+                for dy in -blur_expand..=blur_expand {
+                    for dx in -blur_expand..=blur_expand {
+                        let canvas_x = px + cx as i64 + CURSOR_SHADOW_OFFSET_X + dx;
+                        let canvas_y = py + cy as i64 + CURSOR_SHADOW_OFFSET_Y + dy;
+
+                        if canvas_x >= 0
+                            && canvas_x < canvas.width() as i64
+                            && canvas_y >= 0
+                            && canvas_y < canvas.height() as i64
+                        {
+                            let canvas_pixel =
+                                canvas.get_pixel_mut(canvas_x as u32, canvas_y as u32);
+                            let alpha = (pass_opacity * 40.0) as u8; // Dark shadow
+                            canvas_pixel[0] = blend_channel(canvas_pixel[0], 0, alpha);
+                            canvas_pixel[1] = blend_channel(canvas_pixel[1], 0, alpha);
+                            canvas_pixel[2] = blend_channel(canvas_pixel[2], 0, alpha);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Draw cursor on top
     for cy in 0..scaled_h {
         for cx in 0..scaled_w {
             let canvas_x = px + cx as i64;

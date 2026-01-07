@@ -227,11 +227,11 @@ fn process_frames_parallel(
                 CORNER_RADIUS,
             );
 
-            // Scale content to fit
+            // Scale content to fit (use Lanczos3 for sharp, high-quality results)
             let scaled_content = content.resize_exact(
                 layout.scaled_width,
                 layout.scaled_height,
-                image::imageops::FilterType::Triangle,
+                image::imageops::FilterType::Lanczos3,
             );
 
             // Apply rounded corners to content

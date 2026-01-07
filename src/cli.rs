@@ -58,8 +58,8 @@ pub enum Commands {
         #[arg(long, value_name = "SECONDS")]
         trim_end: Option<f64>,
 
-        /// Cursor scale factor (default: 1.5)
-        #[arg(long, default_value = "1.5")]
+        /// Cursor scale factor (default: 2.0)
+        #[arg(long, default_value = "2.0")]
         cursor_scale: f64,
 
         /// Seconds of inactivity before cursor fades (default: 2.0)

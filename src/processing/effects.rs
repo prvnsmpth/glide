@@ -270,7 +270,7 @@ pub fn apply_zoom(img: &DynamicImage, zoom: f64, cursor_x: f64, cursor_y: f64) -
     let view_left = view_left.clamp(0.0, max_left);
     let view_top = view_top.clamp(0.0, max_top);
 
-    // Crop and resize (use Triangle filter for speed, still decent quality)
+    // Crop and resize (use Lanczos3 filter for sharp, high-quality results)
     let cropped = img.crop_imm(
         view_left as u32,
         view_top as u32,
@@ -278,7 +278,7 @@ pub fn apply_zoom(img: &DynamicImage, zoom: f64, cursor_x: f64, cursor_y: f64) -
         view_height as u32,
     );
 
-    cropped.resize_exact(width, height, image::imageops::FilterType::Triangle)
+    cropped.resize_exact(width, height, image::imageops::FilterType::Lanczos3)
 }
 
 #[cfg(test)]
