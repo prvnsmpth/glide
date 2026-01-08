@@ -9,6 +9,8 @@ A CLI screen recorder for macOS with automatic zoom effects on clicks, smooth cu
 - **Smart Panning** - Camera smoothly pans between click locations while staying zoomed
 - **Custom Backgrounds** - Add solid colors or images behind your recordings
 - **Rounded Corners & Shadows** - Professional styling with anti-aliased corners and drop shadows
+- **Motion Blur** - Cinematic blur during zoom and pan transitions
+- **Custom Cursor** - Enlarged cursor with shadow, configurable size and fade timeout
 - **Trimming** - Remove unwanted start/end sections during processing
 - **Hardware Acceleration** - Uses VideoToolbox (GPU) encoding when available
 
@@ -116,6 +118,7 @@ Glide uses a two-pass system:
 | `--display <N>` | Record display by index |
 | `--window <ID>` | Record window by ID |
 | `-o, --output <PATH>` | Output file path (required) |
+| `--capture-system-cursor` | Capture system cursor in video (default: off) |
 
 ### `glide process`
 
@@ -126,6 +129,10 @@ Glide uses a two-pass system:
 | `--background <VALUE>` | Hex color (`#RRGGBB`) or image path |
 | `--trim-start <SECS>` | Seconds to trim from start |
 | `--trim-end <SECS>` | Seconds to trim from end |
+| `--cursor-scale <N>` | Cursor size multiplier (default: 2.0) |
+| `--cursor-timeout <SECS>` | Seconds before cursor fades (default: 2.0) |
+| `--no-cursor` | Disable custom cursor rendering |
+| `--no-motion-blur` | Disable motion blur during zoom/pan |
 
 ## Examples
 
@@ -163,7 +170,10 @@ glide process tutorial-raw.mp4 -o tutorial.mp4 \
 - **Codec**: H.264 (VideoToolbox GPU or libx264 fallback)
 - **Zoom Level**: 1.5x on clicks
 - **Corner Radius**: 12px with anti-aliasing
-- **Shadow**: 8px offset, 20px blur
+- **Window Shadow**: 8px offset, 20px blur
+- **Cursor**: 2x scale with drop shadow, Lanczos3 interpolation
+- **Motion Blur**: Radial blur on zoom, directional blur on pan
+- **Scaling**: Lanczos3 filter for sharp results at all zoom levels
 
 ## License
 
