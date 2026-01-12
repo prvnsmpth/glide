@@ -1,3 +1,6 @@
+use crate::processing::click_highlight::{
+    draw_click_highlights, get_active_ripples, ClickHighlightConfig,
+};
 use crate::processing::cursor::{draw_cursor, get_smoothed_cursor, CursorConfig};
 use crate::processing::effects::{
     apply_rounded_corners, apply_zoom, draw_shadow, Background, ContentLayout, CORNER_RADIUS,
@@ -25,6 +28,7 @@ pub fn process_video(
     cursor_timeout: f64,
     no_cursor: bool,
     no_motion_blur: bool,
+    no_click_highlight: bool,
 ) -> Result<()> {
     // Load metadata
     let metadata = RecordingMetadata::load(input)
@@ -46,6 +50,12 @@ pub fn process_video(
         ..Default::default()
     };
 
+    // Create click highlight config
+    let click_highlight_config = ClickHighlightConfig {
+        enabled: !no_click_highlight,
+        ..Default::default()
+    };
+
     println!("Processing video: {}", input.display());
     println!(
         "  Source: {:?} ({}x{})",
@@ -64,6 +74,14 @@ pub fn process_video(
     println!(
         "  Motion blur: {}",
         if motion_blur_config.enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
+    println!(
+        "  Click highlight: {}",
+        if click_highlight_config.enabled {
             "enabled"
         } else {
             "disabled"
@@ -152,6 +170,7 @@ pub fn process_video(
         time_offset,
         cursor_config.as_ref(),
         &motion_blur_config,
+        &click_highlight_config,
     )?;
 
     // Encode the generated 60fps frames
@@ -175,6 +194,7 @@ fn process_frames_parallel(
     time_offset: f64,
     cursor_config: Option<&CursorConfig>,
     motion_blur_config: &MotionBlurConfig,
+    click_highlight_config: &ClickHighlightConfig,
 ) -> Result<()> {
     let pb = ProgressBar::new(output_frame_count as u64);
     pb.set_style(
@@ -293,6 +313,36 @@ fn process_frames_parallel(
                         cursor_state.opacity,
                     );
                 }
+            }
+
+            // Draw click highlights if enabled
+            if click_highlight_config.enabled {
+                let ripples = get_active_ripples(
+                    adjusted_timestamp,
+                    &metadata.cursor_events,
+                    click_highlight_config,
+                );
+
+                // Transform ripples to canvas space
+                let canvas_ripples: Vec<_> = ripples
+                    .iter()
+                    .map(|r| {
+                        // Transform from screen points to canvas space
+                        let ripple_canvas_x = layout.offset_x as f64
+                            + (r.x * scale_factor - offset_x_scaled) * layout.scale;
+                        let ripple_canvas_y = layout.offset_y as f64
+                            + (r.y * scale_factor - offset_y_scaled) * layout.scale;
+                        crate::processing::click_highlight::ActiveRipple {
+                            x: ripple_canvas_x,
+                            y: ripple_canvas_y,
+                            progress: r.progress,
+                        }
+                    })
+                    .collect();
+
+                // Use fixed sizes in canvas space (don't scale with content)
+                // This ensures the highlight is always visible regardless of content scale
+                draw_click_highlights(&mut canvas, &canvas_ripples, click_highlight_config);
             }
 
             let zoomed_img = if zoom > 1.01 {

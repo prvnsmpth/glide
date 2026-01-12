@@ -1,3 +1,4 @@
+pub mod click_highlight;
 pub mod cursor;
 pub mod effects;
 pub mod frames;

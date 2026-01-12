@@ -73,6 +73,10 @@ pub enum Commands {
         /// Disable motion blur during zoom/pan transitions
         #[arg(long)]
         no_motion_blur: bool,
+
+        /// Disable click highlight effect (expanding ring on clicks)
+        #[arg(long)]
+        no_click_highlight: bool,
     },
 }
 
