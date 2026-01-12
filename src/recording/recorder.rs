@@ -45,9 +45,8 @@ pub fn record_display(display: &DisplayInfo, output: &Path, capture_system_curso
     let mut capture_session = capture::start_display_capture(&sc_display, &config)
         .context("Failed to start screen capture")?;
 
-    // Start cursor tracking and record the start instant for offset calculation
+    // Start cursor tracking
     let mut cursor_tracker = CursorTracker::new();
-    let cursor_start_instant = Instant::now();
     cursor_tracker.start()?;
 
     // Progress indicator
@@ -77,10 +76,6 @@ pub fn record_display(display: &DisplayInfo, output: &Path, capture_system_curso
 
     let actual_width = first_frame.width as u32;
     let actual_height = first_frame.height as u32;
-
-    // Calculate offset: time from cursor tracking start to first video frame
-    // This is the precise timing relationship between cursor events and video frames
-    let cursor_to_video_offset = cursor_start_instant.elapsed().as_secs_f64();
 
     // Start FFmpeg encoder with actual dimensions
     let mut encoder = VideoEncoder::new(actual_width, actual_height, 60, output)
@@ -133,7 +128,6 @@ pub fn record_display(display: &DisplayInfo, output: &Path, capture_system_curso
     let mut metadata = RecordingMetadata::new_display(display.index, actual_width, actual_height, display.scale_factor);
     metadata.cursor_events = cursor_events;
     metadata.cursor_tracking_duration = cursor_duration;
-    metadata.cursor_to_video_offset = cursor_to_video_offset;
     metadata.save(output)?;
 
     let duration = start.elapsed();
@@ -192,9 +186,8 @@ pub fn record_window(window: &WindowInfo, output: &Path, capture_system_cursor: 
     let mut capture_session = capture::start_window_capture(&sc_window, &config)
         .context("Failed to start window capture")?;
 
-    // Start cursor tracking and record the start instant for offset calculation
+    // Start cursor tracking
     let mut cursor_tracker = CursorTracker::new();
-    let cursor_start_instant = Instant::now();
     cursor_tracker.start()?;
 
     let pb = ProgressBar::new_spinner();
@@ -223,10 +216,6 @@ pub fn record_window(window: &WindowInfo, output: &Path, capture_system_cursor: 
 
     let actual_width = first_frame.width as u32;
     let actual_height = first_frame.height as u32;
-
-    // Calculate offset: time from cursor tracking start to first video frame
-    // This is the precise timing relationship between cursor events and video frames
-    let cursor_to_video_offset = cursor_start_instant.elapsed().as_secs_f64();
 
     // Start FFmpeg encoder with actual dimensions
     let mut encoder = VideoEncoder::new(actual_width, actual_height, 60, output)
@@ -279,7 +268,6 @@ pub fn record_window(window: &WindowInfo, output: &Path, capture_system_cursor: 
     );
     metadata.cursor_events = cursor_events;
     metadata.cursor_tracking_duration = cursor_duration;
-    metadata.cursor_to_video_offset = cursor_to_video_offset;
     metadata.save(output)?;
 
     let duration = start.elapsed();

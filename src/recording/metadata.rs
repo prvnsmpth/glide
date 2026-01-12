@@ -26,10 +26,6 @@ pub struct RecordingMetadata {
     /// Duration of cursor tracking (for timestamp synchronization)
     #[serde(default)]
     pub cursor_tracking_duration: f64,
-    /// Offset from cursor tracking start to first video frame (seconds)
-    /// This is the precise timing offset recorded at capture time
-    #[serde(default)]
-    pub cursor_to_video_offset: f64,
     /// Display scale factor (1.0 for standard, 2.0 for Retina)
     /// Used to convert cursor coordinates from screen points to pixels
     #[serde(default = "default_scale_factor")]
@@ -46,7 +42,6 @@ impl RecordingMetadata {
             height,
             window_offset: (0, 0),
             cursor_tracking_duration: 0.0,
-            cursor_to_video_offset: 0.0,
             scale_factor,
             cursor_events: Vec::new(),
         }
@@ -60,7 +55,6 @@ impl RecordingMetadata {
             height,
             window_offset: (offset_x, offset_y),
             cursor_tracking_duration: 0.0,
-            cursor_to_video_offset: 0.0,
             scale_factor,
             cursor_events: Vec::new(),
         }
