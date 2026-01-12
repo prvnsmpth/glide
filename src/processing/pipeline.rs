@@ -138,12 +138,16 @@ pub fn process_video(
     println!("  Output: {} frames at {:.0}fps", output_frame_count, target_fps);
 
     // Calculate timestamp offset for synchronization
-    // If cursor tracking ran longer than video, cursor events are ahead
-    // Also account for trim_start: cursor events need to be shifted by trim_start
-    let base_time_offset = if metadata.cursor_tracking_duration > 0.0 {
+    // Use the precise offset recorded at capture time if available,
+    // otherwise fall back to the approximate calculation for old recordings
+    let base_time_offset = if metadata.cursor_to_video_offset > 0.0 {
+        // Precise offset: time from cursor tracking start to first video frame
+        metadata.cursor_to_video_offset
+    } else if metadata.cursor_tracking_duration > 0.0 {
+        // Fallback for old recordings: approximate from durations
         metadata.cursor_tracking_duration - original_duration
     } else {
-        0.0 // Old recordings without this field
+        0.0 // Very old recordings without timing fields
     };
     // Add trim_start to offset since we're starting from a later point in the video
     let time_offset = base_time_offset + trim_start_secs;
