@@ -1,6 +1,19 @@
-use std::process::Command;
-
 fn main() {
+    #[cfg(target_os = "macos")]
+    {
+        macos_build();
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        linux_build();
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_build() {
+    use std::process::Command;
+
     // Add rpath for Swift runtime from Command Line Tools
     // This is needed because screencapturekit-rs uses Swift bridging
 
@@ -28,4 +41,14 @@ fn main() {
 
     // Add system Swift path as fallback
     println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
+}
+
+#[cfg(target_os = "linux")]
+fn linux_build() {
+    // Linux build configuration
+    // Link XCB libraries for X11 support
+    // x11rb handles this via pkg-config, but we can add explicit paths if needed
+
+    // Ensure XCB libraries are available
+    println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
 }

@@ -1,5 +1,13 @@
-use crate::macos::{list_displays, CursorTracker, DisplayInfo, WindowInfo};
-use crate::recording::capture::{self, CaptureConfig};
+#[cfg(target_os = "macos")]
+use crate::macos::{
+    find_display, find_window, list_displays, start_display_capture, start_window_capture,
+    CaptureConfig, CursorTracker, DisplayInfo, WindowInfo,
+};
+#[cfg(target_os = "linux")]
+use crate::linux::{
+    find_display, find_window, list_displays, start_display_capture, start_window_capture,
+    CaptureConfig, CursorTracker, DisplayInfo, WindowInfo,
+};
 use crate::recording::encoder::{self, VideoEncoder};
 use crate::recording::metadata::RecordingMetadata;
 use anyhow::{Context, Result};
@@ -25,9 +33,9 @@ pub fn record_display(display: &DisplayInfo, output: &Path, capture_system_curso
     println!("Recording screen to {}", output.display());
     println!("Press Ctrl+C to stop recording...\n");
 
-    // Find the display in ScreenCaptureKit
-    let sc_display = capture::find_display(display.index)
-        .context("Failed to find display in ScreenCaptureKit")?;
+    // Find the display
+    let sc_display = find_display(display.index)
+        .context("Failed to find display")?;
 
     // Get the display frame for dimensions
     let frame = sc_display.frame();
@@ -41,8 +49,8 @@ pub fn record_display(display: &DisplayInfo, output: &Path, capture_system_curso
         height,
     };
 
-    // Start ScreenCaptureKit capture
-    let mut capture_session = capture::start_display_capture(&sc_display, &config)
+    // Start screen capture
+    let mut capture_session = start_display_capture(&sc_display, &config)
         .context("Failed to start screen capture")?;
 
     // Start cursor tracking
@@ -162,15 +170,15 @@ pub fn record_window(window: &WindowInfo, output: &Path, capture_system_cursor: 
     );
     println!("Press Ctrl+C to stop recording...\n");
 
-    // Find the window in ScreenCaptureKit
-    let sc_window = capture::find_window(window.id)
-        .context("Failed to find window in ScreenCaptureKit")?;
+    // Find the window
+    let sc_window = find_window(window.id)
+        .context("Failed to find window")?;
 
     // Get the display scale factor for dimensions
     let displays = list_displays()?;
     let display = displays.into_iter().find(|d| d.is_main).unwrap();
 
-    // Get window frame for dimensions (ScreenCaptureKit handles this natively!)
+    // Get window frame for dimensions
     let frame = sc_window.frame();
     let width = (frame.width * display.scale_factor) as u32;
     let height = (frame.height * display.scale_factor) as u32;
@@ -182,8 +190,8 @@ pub fn record_window(window: &WindowInfo, output: &Path, capture_system_cursor: 
         height,
     };
 
-    // Start ScreenCaptureKit capture (native window capture - no cropping needed!)
-    let mut capture_session = capture::start_window_capture(&sc_window, &config)
+    // Start window capture
+    let mut capture_session = start_window_capture(&sc_window, &config)
         .context("Failed to start window capture")?;
 
     // Start cursor tracking

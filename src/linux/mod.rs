@@ -1,3 +1,8 @@
+//! Linux X11 support module
+//!
+//! Provides display enumeration, window enumeration, cursor tracking,
+//! and screen capture for Linux X11 environments.
+
 pub mod capture;
 pub mod display;
 pub mod event_tap;
