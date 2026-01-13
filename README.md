@@ -1,6 +1,6 @@
 # Glide
 
-A CLI screen recorder for macOS with automatic zoom effects on clicks, smooth cursor tracking, and professional-looking output.
+A CLI screen recorder for macOS and Linux with automatic zoom effects on clicks, smooth cursor tracking, and professional-looking output.
 
 ## Features
 
@@ -10,23 +10,33 @@ A CLI screen recorder for macOS with automatic zoom effects on clicks, smooth cu
 - **Custom Backgrounds** - Add solid colors or images behind your recordings
 - **Rounded Corners & Shadows** - Professional styling with anti-aliased corners and drop shadows
 - **Motion Blur** - Cinematic blur during zoom and pan transitions
+- **Click Highlights** - Animated expanding rings on clicks for visual emphasis
 - **Custom Cursor** - Enlarged cursor with shadow, configurable size and fade timeout
 - **Trimming** - Remove unwanted start/end sections during processing
-- **Hardware Acceleration** - Uses VideoToolbox (GPU) encoding when available
+- **Hardware Acceleration** - GPU encoding via VideoToolbox (macOS), NVENC, or VAAPI (Linux)
 
 ## Requirements
 
+### macOS
 - macOS 12.3 or later
 - FFmpeg (install via `brew install ffmpeg`)
 - Rust toolchain (for building from source)
 
-### Permissions
-
-Glide requires the following macOS permissions:
+**Permissions required:**
 - **Screen Recording** - To capture display/window content
 - **Accessibility** - To track cursor position and clicks
 
 Grant these in **System Preferences > Privacy & Security**.
+
+### Linux
+- X11 display server
+- FFmpeg (install via your package manager)
+- Rust toolchain (for building from source)
+
+**GPU encoding support:**
+- NVIDIA GPUs: NVENC (requires nvidia drivers)
+- AMD/Intel GPUs: VAAPI
+- Falls back to software encoding (libx264) if unavailable
 
 ## Installation
 
@@ -133,6 +143,7 @@ Glide uses a two-pass system:
 | `--cursor-timeout <SECS>` | Seconds before cursor fades (default: 2.0) |
 | `--no-cursor` | Disable custom cursor rendering |
 | `--no-motion-blur` | Disable motion blur during zoom/pan |
+| `--no-click-highlight` | Disable click highlight effect (expanding rings) |
 
 ## Examples
 
@@ -167,14 +178,15 @@ glide process tutorial-raw.mp4 -o tutorial.mp4 \
 
 - **Output Resolution**: 1920x1080
 - **Frame Rate**: 60fps
-- **Codec**: H.264 (VideoToolbox GPU or libx264 fallback)
+- **Codec**: H.264 (VideoToolbox on macOS, NVENC/VAAPI on Linux, libx264 fallback)
 - **Zoom Level**: 1.5x on clicks
 - **Corner Radius**: 12px with anti-aliasing
 - **Window Shadow**: 8px offset, 20px blur
 - **Cursor**: 2x scale with drop shadow, Lanczos3 interpolation
 - **Motion Blur**: Radial blur on zoom, directional blur on pan
+- **Click Highlights**: Animated expanding rings with fade effect
 - **Scaling**: Lanczos3 filter for sharp results at all zoom levels
 
 ## License
 
-MIT
+DO WHATEVER YOU WANT PUBLIC LICENSE - See [LICENSE](LICENSE) for details.
