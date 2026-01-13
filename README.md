@@ -98,8 +98,8 @@ glide process recording.mp4 -o final.mp4 --trim-start 2.0 --trim-end 1.0
 Glide uses a two-pass system:
 
 ### 1. Recording Phase
-- Captures screen/window content at 60fps using FFmpeg with AVFoundation
-- Simultaneously tracks cursor position and click events via macOS CGEventTap
+- Captures screen/window content at 60fps using FFmpeg (AVFoundation on macOS, x11grab on Linux)
+- Simultaneously tracks cursor position and click events (CGEventTap on macOS, X11 polling on Linux)
 - Saves cursor metadata to a JSON file alongside the video
 
 ### 2. Processing Phase
@@ -107,7 +107,7 @@ Glide uses a two-pass system:
 - Processes frames in parallel using rayon
 - Applies zoom effects based on recorded click events:
   - **Anticipatory zoom** starts 0.6s before each click
-  - **Hold** at 1.5x zoom for 4 seconds
+  - **Hold** at 1.8x zoom for 4 seconds
   - **Smooth ease-out** over 0.8 seconds
 - Adds rounded corners, drop shadows, and custom backgrounds
 - Re-encodes to MP4 with hardware acceleration
@@ -179,7 +179,7 @@ glide process tutorial-raw.mp4 -o tutorial.mp4 \
 - **Output Resolution**: 1920x1080
 - **Frame Rate**: 60fps
 - **Codec**: H.264 (VideoToolbox on macOS, NVENC/VAAPI on Linux, libx264 fallback)
-- **Zoom Level**: 1.5x on clicks
+- **Zoom Level**: 1.8x on clicks
 - **Corner Radius**: 12px with anti-aliasing
 - **Window Shadow**: 8px offset, 20px blur
 - **Cursor**: 2x scale with drop shadow, Lanczos3 interpolation
