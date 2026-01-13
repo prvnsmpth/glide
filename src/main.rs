@@ -1,18 +1,19 @@
 mod cli;
-#[cfg(target_os = "macos")]
-mod macos;
+mod cursor_types;
 #[cfg(target_os = "linux")]
 mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
 mod processing;
 mod recording;
 
 use anyhow::Result;
 use clap::Parser;
 use cli::{Cli, Commands, ListTarget};
-#[cfg(target_os = "macos")]
-use macos::{list_displays, list_windows};
 #[cfg(target_os = "linux")]
 use linux::{list_displays, list_windows};
+#[cfg(target_os = "macos")]
+use macos::{list_displays, list_windows};
 use processing::process_video;
 use recording::{record_display, record_window};
 
@@ -49,7 +50,11 @@ fn main() -> Result<()> {
                             "  [{id}] {owner} - {name} ({width}x{height})",
                             id = w.id,
                             owner = w.owner,
-                            name = if w.name.is_empty() { "(untitled)" } else { &w.name },
+                            name = if w.name.is_empty() {
+                                "(untitled)"
+                            } else {
+                                &w.name
+                            },
                             width = w.bounds.2,
                             height = w.bounds.3,
                         );

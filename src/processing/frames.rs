@@ -28,10 +28,7 @@ pub fn extract_frames(
     // Add duration limit
     args.extend(["-t", duration_str.as_str()]);
 
-    args.extend([
-        "-vsync",
-        "0",
-    ]);
+    args.extend(["-vsync", "0"]);
     args.push(output_pattern.to_str().unwrap());
 
     let status = Command::new("ffmpeg")

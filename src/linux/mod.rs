@@ -11,7 +11,6 @@ pub mod window;
 // Re-export commonly used types
 pub use capture::{
     find_display, find_window, start_display_capture, start_window_capture, CaptureConfig,
-    CaptureSession, CapturedFrame,
 };
 pub use display::{list_displays, DisplayInfo};
 pub use event_tap::CursorTracker;

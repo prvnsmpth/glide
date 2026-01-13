@@ -149,8 +149,8 @@ impl CaptureSession {
 
 /// Find a display by index from ScreenCaptureKit
 pub fn find_display(display_index: usize) -> Result<SCDisplay> {
-    let content =
-        SCShareableContent::get().context("Failed to get shareable content from ScreenCaptureKit")?;
+    let content = SCShareableContent::get()
+        .context("Failed to get shareable content from ScreenCaptureKit")?;
 
     let displays = content.displays();
     displays
@@ -161,8 +161,8 @@ pub fn find_display(display_index: usize) -> Result<SCDisplay> {
 
 /// Find a window by ID from ScreenCaptureKit
 pub fn find_window(window_id: u32) -> Result<SCWindow> {
-    let content =
-        SCShareableContent::get().context("Failed to get shareable content from ScreenCaptureKit")?;
+    let content = SCShareableContent::get()
+        .context("Failed to get shareable content from ScreenCaptureKit")?;
 
     let windows = content.windows();
     windows
@@ -172,7 +172,10 @@ pub fn find_window(window_id: u32) -> Result<SCWindow> {
 }
 
 /// Start capturing a display
-pub fn start_display_capture(display: &SCDisplay, config: &CaptureConfig) -> Result<CaptureSession> {
+pub fn start_display_capture(
+    display: &SCDisplay,
+    config: &CaptureConfig,
+) -> Result<CaptureSession> {
     // Create content filter for the display
     let filter = SCContentFilter::create()
         .with_display(display)
@@ -191,7 +194,10 @@ pub fn start_window_capture(window: &SCWindow, config: &CaptureConfig) -> Result
 }
 
 /// Internal function to start capture with a given filter
-fn start_capture_with_filter(filter: SCContentFilter, config: &CaptureConfig) -> Result<CaptureSession> {
+fn start_capture_with_filter(
+    filter: SCContentFilter,
+    config: &CaptureConfig,
+) -> Result<CaptureSession> {
     // Frame interval for 60 FPS
     let frame_interval = CMTime::new(1, 60);
 

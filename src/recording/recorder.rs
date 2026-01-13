@@ -1,10 +1,10 @@
-#[cfg(target_os = "macos")]
-use crate::macos::{
+#[cfg(target_os = "linux")]
+use crate::linux::{
     find_display, find_window, list_displays, start_display_capture, start_window_capture,
     CaptureConfig, CursorTracker, DisplayInfo, WindowInfo,
 };
-#[cfg(target_os = "linux")]
-use crate::linux::{
+#[cfg(target_os = "macos")]
+use crate::macos::{
     find_display, find_window, list_displays, start_display_capture, start_window_capture,
     CaptureConfig, CursorTracker, DisplayInfo, WindowInfo,
 };
@@ -17,7 +17,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
-pub fn record_display(display: &DisplayInfo, output: &Path, capture_system_cursor: bool) -> Result<()> {
+pub fn record_display(
+    display: &DisplayInfo,
+    output: &Path,
+    capture_system_cursor: bool,
+) -> Result<()> {
     // Check FFmpeg availability (still needed for encoding)
     encoder::check_ffmpeg()?;
 
@@ -26,6 +30,7 @@ pub fn record_display(display: &DisplayInfo, output: &Path, capture_system_curso
     let r = running.clone();
 
     ctrlc::set_handler(move || {
+        eprintln!("\nCtrl+C received, stopping...");
         r.store(false, Ordering::SeqCst);
     })
     .context("Failed to set Ctrl+C handler")?;
@@ -34,8 +39,7 @@ pub fn record_display(display: &DisplayInfo, output: &Path, capture_system_curso
     println!("Press Ctrl+C to stop recording...\n");
 
     // Find the display
-    let sc_display = find_display(display.index)
-        .context("Failed to find display")?;
+    let sc_display = find_display(display.index).context("Failed to find display")?;
 
     // Get the display frame for dimensions
     let frame = sc_display.frame();
@@ -50,8 +54,8 @@ pub fn record_display(display: &DisplayInfo, output: &Path, capture_system_curso
     };
 
     // Start screen capture
-    let mut capture_session = start_display_capture(&sc_display, &config)
-        .context("Failed to start screen capture")?;
+    let mut capture_session =
+        start_display_capture(&sc_display, &config).context("Failed to start screen capture")?;
 
     // Start cursor tracking
     let mut cursor_tracker = CursorTracker::new();
@@ -121,7 +125,9 @@ pub fn record_display(display: &DisplayInfo, output: &Path, capture_system_curso
     capture_session.stop()?;
 
     // Finish encoding
-    encoder.finish().context("Failed to finish video encoding")?;
+    encoder
+        .finish()
+        .context("Failed to finish video encoding")?;
 
     let duration = start.elapsed();
     let expected_frames = (duration.as_secs_f64() * 60.0) as u64;
@@ -133,7 +139,12 @@ pub fn record_display(display: &DisplayInfo, output: &Path, capture_system_curso
     );
 
     // Save metadata
-    let mut metadata = RecordingMetadata::new_display(display.index, actual_width, actual_height, display.scale_factor);
+    let mut metadata = RecordingMetadata::new_display(
+        display.index,
+        actual_width,
+        actual_height,
+        display.scale_factor,
+    );
     metadata.cursor_events = cursor_events;
     metadata.cursor_tracking_duration = cursor_duration;
     metadata.save(output)?;
@@ -153,13 +164,27 @@ pub fn record_display(display: &DisplayInfo, output: &Path, capture_system_curso
     Ok(())
 }
 
-pub fn record_window(window: &WindowInfo, output: &Path, capture_system_cursor: bool) -> Result<()> {
+pub fn record_window(
+    window: &WindowInfo,
+    output: &Path,
+    capture_system_cursor: bool,
+) -> Result<()> {
     encoder::check_ffmpeg()?;
 
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
 
+    // Track if we've already received Ctrl+C
+    let ctrl_c_count = Arc::new(AtomicBool::new(false));
+    let ctrl_c_count_clone = Arc::clone(&ctrl_c_count);
+
     ctrlc::set_handler(move || {
+        if ctrl_c_count_clone.swap(true, Ordering::SeqCst) {
+            // Second Ctrl+C - force exit
+            eprintln!("\nForce exit...");
+            std::process::exit(1);
+        }
+        eprintln!("\nStopping... (press Ctrl+C again to force quit)");
         r.store(false, Ordering::SeqCst);
     })
     .context("Failed to set Ctrl+C handler")?;
@@ -171,8 +196,7 @@ pub fn record_window(window: &WindowInfo, output: &Path, capture_system_cursor: 
     println!("Press Ctrl+C to stop recording...\n");
 
     // Find the window
-    let sc_window = find_window(window.id)
-        .context("Failed to find window")?;
+    let sc_window = find_window(window.id).context("Failed to find window")?;
 
     // Get the display scale factor for dimensions
     let displays = list_displays()?;
@@ -191,8 +215,8 @@ pub fn record_window(window: &WindowInfo, output: &Path, capture_system_cursor: 
     };
 
     // Start window capture
-    let mut capture_session = start_window_capture(&sc_window, &config)
-        .context("Failed to start window capture")?;
+    let mut capture_session =
+        start_window_capture(&sc_window, &config).context("Failed to start window capture")?;
 
     // Start cursor tracking
     let mut cursor_tracker = CursorTracker::new();
@@ -256,7 +280,9 @@ pub fn record_window(window: &WindowInfo, output: &Path, capture_system_cursor: 
     }
 
     capture_session.stop()?;
-    encoder.finish().context("Failed to finish video encoding")?;
+    encoder
+        .finish()
+        .context("Failed to finish video encoding")?;
 
     let expected_frames = (start.elapsed().as_secs_f64() * 60.0) as u64;
     eprintln!(
@@ -270,8 +296,8 @@ pub fn record_window(window: &WindowInfo, output: &Path, capture_system_cursor: 
         window.id,
         actual_width,
         actual_height,
-        window.bounds.0,  // x offset
-        window.bounds.1,  // y offset
+        window.bounds.0, // x offset
+        window.bounds.1, // y offset
         display.scale_factor,
     );
     metadata.cursor_events = cursor_events;

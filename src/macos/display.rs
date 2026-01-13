@@ -12,14 +12,14 @@ extern "C" {
 }
 
 pub struct DisplayInfo {
-    pub index: usize,        // 0-based index for user
-    pub avf_index: usize,    // AVFoundation device index for FFmpeg
-    pub width: u32,          // Width in points (logical pixels)
-    pub height: u32,         // Height in points (logical pixels)
+    pub index: usize,     // 0-based index for user
+    pub avf_index: usize, // AVFoundation device index for FFmpeg
+    pub width: u32,       // Width in points (logical pixels)
+    pub height: u32,      // Height in points (logical pixels)
     pub x: i32,
     pub y: i32,
     pub is_main: bool,
-    pub scale_factor: f64,   // Retina scale factor (2.0 on Retina, 1.0 otherwise)
+    pub scale_factor: f64, // Retina scale factor (2.0 on Retina, 1.0 otherwise)
 }
 
 /// Get the native pixel dimensions of a display (accounts for Retina scaling)

@@ -2,7 +2,7 @@
 //!
 //! Applies radial blur during zoom-in/zoom-out and directional blur during panning.
 
-use crate::macos::event_tap::CursorEvent;
+use crate::cursor_types::CursorEvent;
 use crate::processing::effects::ContentLayout;
 use crate::processing::zoom::{calculate_zoom, ZoomConfig};
 use image::{Rgba, RgbaImage};
@@ -120,14 +120,9 @@ pub fn calculate_motion_state(
     }
 }
 
-fn determine_motion_phase(
-    zoom: f64,
-    zoom_velocity: f64,
-    pan_vx: f64,
-    pan_vy: f64,
-) -> MotionPhase {
-    const ZOOM_THRESHOLD: f64 = 0.05;  // Lower threshold
-    const PAN_THRESHOLD: f64 = 50.0;   // pixels/second
+fn determine_motion_phase(zoom: f64, zoom_velocity: f64, pan_vx: f64, pan_vy: f64) -> MotionPhase {
+    const ZOOM_THRESHOLD: f64 = 0.05; // Lower threshold
+    const PAN_THRESHOLD: f64 = 50.0; // pixels/second
 
     if zoom < 1.01 {
         return MotionPhase::Idle;
@@ -241,7 +236,7 @@ fn apply_radial_blur(
                 // Sample positions along radial line - ASYMMETRIC for motion blur effect
                 // For zoom-in (direction=1), sample from outward (0 to 1) - content coming from edges
                 // For zoom-out (direction=-1), sample from inward (-1 to 0) - content going to edges
-                let t = i as f64 / (samples - 1) as f64;  // 0 to 1
+                let t = i as f64 / (samples - 1) as f64; // 0 to 1
                 let offset = t * pixel_blur * direction;
 
                 let sample_x = (x as f64 + dir_x * offset).clamp(0.0, (width - 1) as f64);
@@ -321,8 +316,8 @@ fn apply_directional_blur(
             for i in 0..samples {
                 // Asymmetric sampling - motion blur trails BEHIND movement
                 // Sample from current position back along velocity vector
-                let t = i as f64 / (samples - 1) as f64;  // 0 to 1
-                let offset = -t * blur_amount;  // Negative = behind movement direction
+                let t = i as f64 / (samples - 1) as f64; // 0 to 1
+                let offset = -t * blur_amount; // Negative = behind movement direction
 
                 let sample_x = (x as f64 + dir_x * offset).clamp(0.0, (width - 1) as f64);
                 let sample_y = (y as f64 + dir_y * offset).clamp(0.0, (height - 1) as f64);

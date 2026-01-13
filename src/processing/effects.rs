@@ -56,9 +56,7 @@ impl Background {
     /// Create a canvas with this background
     pub fn create_canvas(&self) -> RgbaImage {
         match self {
-            Background::Color(color) => {
-                RgbaImage::from_pixel(OUTPUT_WIDTH, OUTPUT_HEIGHT, *color)
-            }
+            Background::Color(color) => RgbaImage::from_pixel(OUTPUT_WIDTH, OUTPUT_HEIGHT, *color),
             Background::Image(img) => img.as_ref().clone(),
         }
     }
@@ -188,8 +186,13 @@ pub fn draw_shadow(canvas: &mut RgbaImage, x: i64, y: i64, width: u32, height: u
                 let layer_width = width + 2 * expand as u32;
                 let layer_height = height + 2 * expand as u32;
 
-                if is_inside_rounded_rect(local_x, local_y, layer_width, layer_height, radius + expand as u32)
-                {
+                if is_inside_rounded_rect(
+                    local_x,
+                    local_y,
+                    layer_width,
+                    layer_height,
+                    radius + expand as u32,
+                ) {
                     let pixel = canvas.get_pixel_mut(px, py);
                     // Blend shadow with existing pixel
                     let alpha = layer_alpha as u8;
@@ -364,11 +367,20 @@ mod tests {
         let cursor_after_x: f64 = cursor_in_crop_x * (1920.0 / view_width);
         let cursor_after_y: f64 = cursor_in_crop_y * (1080.0 / view_height);
 
-        println!("Cursor should be at: ({}, {})", cursor_after_x, cursor_after_y);
+        println!(
+            "Cursor should be at: ({}, {})",
+            cursor_after_x, cursor_after_y
+        );
 
         // Should be approximately at original position
-        assert!((cursor_after_x - cursor_x).abs() < 1.0, "X position should be preserved");
-        assert!((cursor_after_y - cursor_y).abs() < 1.0, "Y position should be preserved");
+        assert!(
+            (cursor_after_x - cursor_x).abs() < 1.0,
+            "X position should be preserved"
+        );
+        assert!(
+            (cursor_after_y - cursor_y).abs() < 1.0,
+            "Y position should be preserved"
+        );
     }
 
     #[test]
@@ -391,7 +403,10 @@ mod tests {
         let view_left = (cursor_x * zoom_factor).max(0.0).min(1920.0 - view_width);
         let view_top = (cursor_y * zoom_factor).max(0.0).min(1080.0 - view_height);
 
-        println!("Corner zoom - view_left: {}, view_top: {}", view_left, view_top);
+        println!(
+            "Corner zoom - view_left: {}, view_top: {}",
+            view_left, view_top
+        );
 
         // View should be offset toward the corner
         assert!(view_left > 0.0, "View should be offset from left");
@@ -448,7 +463,10 @@ mod tests {
         let zoomed_pixel = result.get_pixel(0, 0);
 
         // The top-left pixel should be the same (zooming from origin)
-        println!("Zero cursor - orig: {:?}, zoomed: {:?}", orig_pixel, zoomed_pixel);
+        println!(
+            "Zero cursor - orig: {:?}, zoomed: {:?}",
+            orig_pixel, zoomed_pixel
+        );
     }
 
     #[test]
@@ -472,8 +490,16 @@ mod tests {
             let view_top = cursor_y * zoom_factor;
 
             // Verify the ratio: view_pos / cursor_pos should be the same for both axes
-            let x_ratio = if cursor_x > 0.0 { view_left / cursor_x } else { zoom_factor };
-            let y_ratio = if cursor_y > 0.0 { view_top / cursor_y } else { zoom_factor };
+            let x_ratio = if cursor_x > 0.0 {
+                view_left / cursor_x
+            } else {
+                zoom_factor
+            };
+            let y_ratio = if cursor_y > 0.0 {
+                view_top / cursor_y
+            } else {
+                zoom_factor
+            };
 
             println!("{}: x_ratio={:.4}, y_ratio={:.4}", label, x_ratio, y_ratio);
 

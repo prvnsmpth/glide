@@ -1,15 +1,12 @@
 //! Linux X11 screen capture using FFmpeg x11grab
 
 use anyhow::{Context, Result};
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufReader, Read};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
+use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::thread;
-
-use crate::linux::display::DisplayInfo;
-use crate::linux::window::WindowInfo;
 
 /// A captured video frame with raw BGRA pixel data
 pub struct CapturedFrame {
@@ -153,9 +150,8 @@ impl CaptureSession {
             use nix::sys::signal::{kill, Signal};
             use nix::unistd::Pid;
 
-            if let Some(pid) = self.ffmpeg_process.id() {
-                let _ = kill(Pid::from_raw(pid as i32), Signal::SIGINT);
-            }
+            let pid = self.ffmpeg_process.id();
+            let _ = kill(Pid::from_raw(pid as i32), Signal::SIGINT);
         }
 
         // Wait a bit for graceful shutdown
@@ -175,22 +171,33 @@ impl CaptureSession {
 }
 
 /// Start capturing a display
-pub fn start_display_capture(display: &X11Display, config: &CaptureConfig) -> Result<CaptureSession> {
-    let width = if config.width > 0 { config.width } else { display.width };
-    let height = if config.height > 0 { config.height } else { display.height };
+pub fn start_display_capture(
+    display: &X11Display,
+    config: &CaptureConfig,
+) -> Result<CaptureSession> {
+    let width = if config.width > 0 {
+        config.width
+    } else {
+        display.width
+    };
+    let height = if config.height > 0 {
+        config.height
+    } else {
+        display.height
+    };
 
     // Build FFmpeg command for x11grab
     // Format: ffmpeg -f x11grab -framerate 60 -video_size WxH -i :0+X,Y -pix_fmt bgra -f rawvideo -
-    let display_input = format!(
-        "{}+{},{}",
-        display.display_string, display.x, display.y
-    );
+    let display_input = format!("{}+{},{}", display.display_string, display.x, display.y);
 
     let mut cmd = Command::new("ffmpeg");
     cmd.args([
-        "-f", "x11grab",
-        "-framerate", "60",
-        "-video_size", &format!("{}x{}", width, height),
+        "-f",
+        "x11grab",
+        "-framerate",
+        "60",
+        "-video_size",
+        &format!("{}x{}", width, height),
     ]);
 
     // Add cursor visibility option
@@ -201,9 +208,12 @@ pub fn start_display_capture(display: &X11Display, config: &CaptureConfig) -> Re
     }
 
     cmd.args([
-        "-i", &display_input,
-        "-pix_fmt", "bgra",
-        "-f", "rawvideo",
+        "-i",
+        &display_input,
+        "-pix_fmt",
+        "bgra",
+        "-f",
+        "rawvideo",
         "-",
     ]);
 
@@ -215,21 +225,29 @@ pub fn start_display_capture(display: &X11Display, config: &CaptureConfig) -> Re
 
 /// Start capturing a specific window
 pub fn start_window_capture(window: &X11Window, config: &CaptureConfig) -> Result<CaptureSession> {
-    let width = if config.width > 0 { config.width } else { window.width };
-    let height = if config.height > 0 { config.height } else { window.height };
+    let width = if config.width > 0 {
+        config.width
+    } else {
+        window.width
+    };
+    let height = if config.height > 0 {
+        config.height
+    } else {
+        window.height
+    };
 
     // For window capture, we can use the -window_id option if available,
     // or fall back to capturing the window's region
-    let display_input = format!(
-        "{}+{},{}",
-        window.display_string, window.x, window.y
-    );
+    let display_input = format!("{}+{},{}", window.display_string, window.x, window.y);
 
     let mut cmd = Command::new("ffmpeg");
     cmd.args([
-        "-f", "x11grab",
-        "-framerate", "60",
-        "-video_size", &format!("{}x{}", width, height),
+        "-f",
+        "x11grab",
+        "-framerate",
+        "60",
+        "-video_size",
+        &format!("{}x{}", width, height),
     ]);
 
     // Add cursor visibility option
@@ -240,9 +258,12 @@ pub fn start_window_capture(window: &X11Window, config: &CaptureConfig) -> Resul
     }
 
     cmd.args([
-        "-i", &display_input,
-        "-pix_fmt", "bgra",
-        "-f", "rawvideo",
+        "-i",
+        &display_input,
+        "-pix_fmt",
+        "bgra",
+        "-f",
+        "rawvideo",
         "-",
     ]);
 

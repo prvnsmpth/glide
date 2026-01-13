@@ -135,7 +135,10 @@ pub fn process_video(
     // Target 60fps for smooth animations
     let target_fps = 60.0;
     let output_frame_count = (trimmed_duration * target_fps).ceil() as usize;
-    println!("  Output: {} frames at {:.0}fps", output_frame_count, target_fps);
+    println!(
+        "  Output: {} frames at {:.0}fps",
+        output_frame_count, target_fps
+    );
 
     // Calculate timestamp offset for synchronization
     // If cursor tracking ran longer than video, cursor events are ahead
@@ -211,179 +214,217 @@ fn process_frames_parallel(
     let layout = ContentLayout::calculate(metadata.width, metadata.height);
     let background = background.clone();
 
-    // Pre-load all source frames for faster access
-    println!("  Loading source frames...");
-    let source_frames: Vec<_> = (1..=source_frame_count)
-        .map(|i| {
-            let path = frames_dir.join(format!("frame_{:06}.png", i));
-            image::open(&path).expect("Failed to load source frame")
-        })
-        .collect();
+    // Process in batches to limit memory usage
+    // Each frame is roughly width*height*4 bytes (~14MB for 2K video)
+    // Limit to ~2GB memory usage for source frames
+    let max_frames_in_memory = 150;
+    let batch_size = max_frames_in_memory.min(output_frame_count);
 
     // Generate output frames at target fps with smooth zoom/cursor interpolation
-    let results: Vec<Result<()>> = (1..=output_frame_count)
-        .into_par_iter()
-        .map(|output_frame_num| {
-            // Calculate timestamp for this output frame
-            let timestamp = (output_frame_num - 1) as f64 / target_fps;
+    // Process in batches to avoid loading all frames into memory
+    let results: Vec<Result<()>> = (0..output_frame_count)
+        .collect::<Vec<_>>()
+        .chunks(batch_size)
+        .flat_map(|batch| {
+            // Determine which source frames we need for this batch
+            let min_source_idx = batch
+                .iter()
+                .map(|&i| ((i as f64 / target_fps) * source_fps).floor() as usize)
+                .min()
+                .unwrap_or(0);
+            let max_source_idx = batch
+                .iter()
+                .map(|&i| ((i as f64 / target_fps) * source_fps).floor() as usize)
+                .max()
+                .unwrap_or(0)
+                .min(source_frame_count - 1);
 
-            // Find the corresponding source frame (nearest neighbor)
-            let source_idx = ((timestamp * source_fps).floor() as usize).min(source_frame_count - 1);
-            let content = &source_frames[source_idx];
+            // Load only the source frames needed for this batch
+            let source_frames: Vec<_> = (min_source_idx..=max_source_idx)
+                .map(|i| {
+                    let path = frames_dir.join(format!("frame_{:06}.png", i + 1));
+                    image::open(&path).expect("Failed to load source frame")
+                })
+                .collect();
 
-            // Output frame path (new numbering for 60fps output)
-            let output_path = frames_dir.join(format!("out_{:06}.png", output_frame_num));
+            // Process this batch in parallel
+            batch
+                .to_vec()
+                .into_par_iter()
+                .map(|output_frame_idx| {
+                    let output_frame_num = output_frame_idx + 1;
 
-            // Create canvas with background
-            let mut canvas = background.create_canvas();
+                    // Calculate timestamp for this output frame
+                    let timestamp = output_frame_idx as f64 / target_fps;
 
-            // Draw shadow first (before content)
-            draw_shadow(
-                &mut canvas,
-                layout.offset_x as i64,
-                layout.offset_y as i64,
-                layout.scaled_width,
-                layout.scaled_height,
-                CORNER_RADIUS,
-            );
+                    // Find the corresponding source frame (nearest neighbor)
+                    let source_idx =
+                        ((timestamp * source_fps).floor() as usize).min(source_frame_count - 1);
+                    let local_idx = source_idx - min_source_idx;
+                    let content = &source_frames[local_idx];
 
-            // Scale content to fit (use Lanczos3 for sharp, high-quality results)
-            let scaled_content = content.resize_exact(
-                layout.scaled_width,
-                layout.scaled_height,
-                image::imageops::FilterType::Lanczos3,
-            );
+                    // Output frame path (new numbering for 60fps output)
+                    let output_path = frames_dir.join(format!("out_{:06}.png", output_frame_num));
 
-            // Apply rounded corners to content
-            let mut rounded_content = scaled_content.to_rgba8();
-            apply_rounded_corners(&mut rounded_content, CORNER_RADIUS);
+                    // Create canvas with background
+                    let mut canvas = background.create_canvas();
 
-            // Overlay content on canvas
-            image::imageops::overlay(
-                &mut canvas,
-                &rounded_content,
-                layout.offset_x as i64,
-                layout.offset_y as i64,
-            );
-
-            // Calculate zoom for this frame
-            // Add time_offset to align cursor timestamps with video timestamps
-            let adjusted_timestamp = timestamp + time_offset;
-            let (zoom, cursor_x, cursor_y) =
-                calculate_zoom(adjusted_timestamp, &metadata.cursor_events, zoom_config);
-
-            // Get scale factor for coordinate conversion (screen points -> pixels)
-            // CGEventTap returns screen points, but video is captured at pixel resolution
-            let scale_factor = metadata.scale_factor.max(1.0);
-
-            // Scale cursor coordinates from screen points to pixels
-            let cursor_x_scaled = cursor_x * scale_factor;
-            let cursor_y_scaled = cursor_y * scale_factor;
-
-            // Translate cursor from screen coordinates to window-relative coordinates
-            // Window offset is also in screen points, so scale it too
-            let (offset_x, offset_y) = metadata.window_offset;
-            let offset_x_scaled = offset_x as f64 * scale_factor;
-            let offset_y_scaled = offset_y as f64 * scale_factor;
-            let window_cursor_x = cursor_x_scaled - offset_x_scaled;
-            let window_cursor_y = cursor_y_scaled - offset_y_scaled;
-
-            // Transform cursor coordinates to canvas space
-            let canvas_cursor_x = layout.offset_x as f64 + window_cursor_x * layout.scale;
-            let canvas_cursor_y = layout.offset_y as f64 + window_cursor_y * layout.scale;
-
-            // Draw cursor if enabled
-            if let Some(cursor_cfg) = cursor_config {
-                let cursor_state =
-                    get_smoothed_cursor(adjusted_timestamp, &metadata.cursor_events, cursor_cfg);
-
-                if cursor_state.opacity > 0.01 {
-                    // Transform smoothed cursor coordinates to canvas space
-                    // Apply scale_factor to convert from screen points to pixels
-                    let smoothed_canvas_x =
-                        layout.offset_x as f64 + (cursor_state.x * scale_factor - offset_x_scaled) * layout.scale;
-                    let smoothed_canvas_y =
-                        layout.offset_y as f64 + (cursor_state.y * scale_factor - offset_y_scaled) * layout.scale;
-
-                    draw_cursor(
+                    // Draw shadow first (before content)
+                    draw_shadow(
                         &mut canvas,
-                        smoothed_canvas_x,
-                        smoothed_canvas_y,
-                        cursor_cfg.cursor_scale * layout.scale,
-                        cursor_state.opacity,
+                        layout.offset_x as i64,
+                        layout.offset_y as i64,
+                        layout.scaled_width,
+                        layout.scaled_height,
+                        CORNER_RADIUS,
                     );
-                }
-            }
 
-            // Draw click highlights if enabled
-            if click_highlight_config.enabled {
-                let ripples = get_active_ripples(
-                    adjusted_timestamp,
-                    &metadata.cursor_events,
-                    click_highlight_config,
-                );
+                    // Scale content to fit (use Lanczos3 for sharp, high-quality results)
+                    let scaled_content = content.resize_exact(
+                        layout.scaled_width,
+                        layout.scaled_height,
+                        image::imageops::FilterType::Lanczos3,
+                    );
 
-                // Transform ripples to canvas space
-                let canvas_ripples: Vec<_> = ripples
-                    .iter()
-                    .map(|r| {
-                        // Transform from screen points to canvas space
-                        let ripple_canvas_x = layout.offset_x as f64
-                            + (r.x * scale_factor - offset_x_scaled) * layout.scale;
-                        let ripple_canvas_y = layout.offset_y as f64
-                            + (r.y * scale_factor - offset_y_scaled) * layout.scale;
-                        crate::processing::click_highlight::ActiveRipple {
-                            x: ripple_canvas_x,
-                            y: ripple_canvas_y,
-                            progress: r.progress,
+                    // Apply rounded corners to content
+                    let mut rounded_content = scaled_content.to_rgba8();
+                    apply_rounded_corners(&mut rounded_content, CORNER_RADIUS);
+
+                    // Overlay content on canvas
+                    image::imageops::overlay(
+                        &mut canvas,
+                        &rounded_content,
+                        layout.offset_x as i64,
+                        layout.offset_y as i64,
+                    );
+
+                    // Calculate zoom for this frame
+                    // Add time_offset to align cursor timestamps with video timestamps
+                    let adjusted_timestamp = timestamp + time_offset;
+                    let (zoom, cursor_x, cursor_y) =
+                        calculate_zoom(adjusted_timestamp, &metadata.cursor_events, zoom_config);
+
+                    // Get scale factor for coordinate conversion (screen points -> pixels)
+                    // CGEventTap returns screen points, but video is captured at pixel resolution
+                    let scale_factor = metadata.scale_factor.max(1.0);
+
+                    // Scale cursor coordinates from screen points to pixels
+                    let cursor_x_scaled = cursor_x * scale_factor;
+                    let cursor_y_scaled = cursor_y * scale_factor;
+
+                    // Translate cursor from screen coordinates to window-relative coordinates
+                    // Window offset is also in screen points, so scale it too
+                    let (offset_x, offset_y) = metadata.window_offset;
+                    let offset_x_scaled = offset_x as f64 * scale_factor;
+                    let offset_y_scaled = offset_y as f64 * scale_factor;
+                    let window_cursor_x = cursor_x_scaled - offset_x_scaled;
+                    let window_cursor_y = cursor_y_scaled - offset_y_scaled;
+
+                    // Transform cursor coordinates to canvas space
+                    let canvas_cursor_x = layout.offset_x as f64 + window_cursor_x * layout.scale;
+                    let canvas_cursor_y = layout.offset_y as f64 + window_cursor_y * layout.scale;
+
+                    // Draw cursor if enabled
+                    if let Some(cursor_cfg) = cursor_config {
+                        let cursor_state = get_smoothed_cursor(
+                            adjusted_timestamp,
+                            &metadata.cursor_events,
+                            cursor_cfg,
+                        );
+
+                        if cursor_state.opacity > 0.01 {
+                            // Transform smoothed cursor coordinates to canvas space
+                            // Apply scale_factor to convert from screen points to pixels
+                            let smoothed_canvas_x = layout.offset_x as f64
+                                + (cursor_state.x * scale_factor - offset_x_scaled) * layout.scale;
+                            let smoothed_canvas_y = layout.offset_y as f64
+                                + (cursor_state.y * scale_factor - offset_y_scaled) * layout.scale;
+
+                            draw_cursor(
+                                &mut canvas,
+                                smoothed_canvas_x,
+                                smoothed_canvas_y,
+                                cursor_cfg.cursor_scale * layout.scale,
+                                cursor_state.opacity,
+                            );
                         }
-                    })
-                    .collect();
+                    }
 
-                // Use fixed sizes in canvas space (don't scale with content)
-                // This ensures the highlight is always visible regardless of content scale
-                draw_click_highlights(&mut canvas, &canvas_ripples, click_highlight_config);
-            }
+                    // Draw click highlights if enabled
+                    if click_highlight_config.enabled {
+                        let ripples = get_active_ripples(
+                            adjusted_timestamp,
+                            &metadata.cursor_events,
+                            click_highlight_config,
+                        );
 
-            let zoomed_img = if zoom > 1.01 {
-                // Apply zoom transformation to canvas
-                apply_zoom(
-                    &DynamicImage::ImageRgba8(canvas),
-                    zoom,
-                    canvas_cursor_x,
-                    canvas_cursor_y,
-                )
-            } else {
-                DynamicImage::ImageRgba8(canvas)
-            };
+                        // Transform ripples to canvas space
+                        let canvas_ripples: Vec<_> = ripples
+                            .iter()
+                            .map(|r| {
+                                // Transform from screen points to canvas space
+                                let ripple_canvas_x = layout.offset_x as f64
+                                    + (r.x * scale_factor - offset_x_scaled) * layout.scale;
+                                let ripple_canvas_y = layout.offset_y as f64
+                                    + (r.y * scale_factor - offset_y_scaled) * layout.scale;
+                                crate::processing::click_highlight::ActiveRipple {
+                                    x: ripple_canvas_x,
+                                    y: ripple_canvas_y,
+                                    progress: r.progress,
+                                }
+                            })
+                            .collect();
 
-            // Apply motion blur during zoom/pan transitions
-            let final_img = if motion_blur_config.enabled {
-                let motion_state = calculate_motion_state(
-                    adjusted_timestamp,
-                    &metadata.cursor_events,
-                    zoom_config,
-                    &layout,
-                    metadata.window_offset,
-                    scale_factor,
-                );
-                let blurred = apply_motion_blur(&zoomed_img.to_rgba8(), &motion_state, motion_blur_config);
-                DynamicImage::ImageRgba8(blurred)
-            } else {
-                zoomed_img
-            };
+                        // Use fixed sizes in canvas space (don't scale with content)
+                        // This ensures the highlight is always visible regardless of content scale
+                        draw_click_highlights(&mut canvas, &canvas_ripples, click_highlight_config);
+                    }
 
-            // Save processed frame
-            final_img
-                .save(&output_path)
-                .with_context(|| format!("Failed to save frame {}", output_frame_num))?;
+                    let zoomed_img = if zoom > 1.01 {
+                        // Apply zoom transformation to canvas
+                        apply_zoom(
+                            &DynamicImage::ImageRgba8(canvas),
+                            zoom,
+                            canvas_cursor_x,
+                            canvas_cursor_y,
+                        )
+                    } else {
+                        DynamicImage::ImageRgba8(canvas)
+                    };
 
-            let count = processed.fetch_add(1, Ordering::Relaxed);
-            if count % 10 == 0 {
-                pb.set_position(count as u64);
-            }
+                    // Apply motion blur during zoom/pan transitions
+                    let final_img = if motion_blur_config.enabled {
+                        let motion_state = calculate_motion_state(
+                            adjusted_timestamp,
+                            &metadata.cursor_events,
+                            zoom_config,
+                            &layout,
+                            metadata.window_offset,
+                            scale_factor,
+                        );
+                        let blurred = apply_motion_blur(
+                            &zoomed_img.to_rgba8(),
+                            &motion_state,
+                            motion_blur_config,
+                        );
+                        DynamicImage::ImageRgba8(blurred)
+                    } else {
+                        zoomed_img
+                    };
 
-            Ok(())
+                    // Save processed frame
+                    final_img
+                        .save(&output_path)
+                        .with_context(|| format!("Failed to save frame {}", output_frame_num))?;
+
+                    let count = processed.fetch_add(1, Ordering::Relaxed);
+                    if count % 10 == 0 {
+                        pb.set_position(count as u64);
+                    }
+
+                    Ok(())
+                })
+                .collect::<Vec<_>>()
         })
         .collect();
 

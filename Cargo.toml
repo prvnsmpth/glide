@@ -19,7 +19,7 @@ anyhow = "1"
 indicatif = "0.17"
 
 # Signal handling
-ctrlc = "3"
+ctrlc = { version = "3", features = ["termination"] }
 image = "0.25.9"
 tempfile = "3.24.0"
 rayon = "1.11.0"

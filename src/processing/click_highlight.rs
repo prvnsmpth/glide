@@ -1,23 +1,23 @@
-use crate::macos::event_tap::{CursorEvent, EventType};
+use crate::cursor_types::{CursorEvent, EventType};
 use crate::processing::effects::blend_channel;
 use image::{Rgba, RgbaImage};
 
 /// Configuration for click highlighting effect
 pub struct ClickHighlightConfig {
     pub enabled: bool,
-    pub duration: f64,      // How long the ripple animation lasts
-    pub max_radius: f64,    // Maximum radius of the expanding ring
-    pub ring_width: f64,    // Width of the ring stroke
-    pub color: Rgba<u8>,    // Color of the ring (with alpha)
+    pub duration: f64,   // How long the ripple animation lasts
+    pub max_radius: f64, // Maximum radius of the expanding ring
+    pub ring_width: f64, // Width of the ring stroke
+    pub color: Rgba<u8>, // Color of the ring (with alpha)
 }
 
 impl Default for ClickHighlightConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            duration: 0.4,            // 400ms animation
-            max_radius: 50.0,         // 50px max radius
-            ring_width: 3.0,          // 3px ring width
+            duration: 0.4,                     // 400ms animation
+            max_radius: 50.0,                  // 50px max radius
+            ring_width: 3.0,                   // 3px ring width
             color: Rgba([255, 255, 255, 255]), // White (shadow provides contrast)
         }
     }
@@ -27,7 +27,7 @@ impl Default for ClickHighlightConfig {
 pub struct ActiveRipple {
     pub x: f64,
     pub y: f64,
-    pub progress: f64,  // 0.0 to 1.0
+    pub progress: f64, // 0.0 to 1.0
 }
 
 /// Find all active ripples at a given timestamp
@@ -72,13 +72,7 @@ pub fn draw_click_highlights(
     }
 
     for ripple in ripples {
-        draw_ring(
-            canvas,
-            ripple.x,
-            ripple.y,
-            ripple.progress,
-            config,
-        );
+        draw_ring(canvas, ripple.x, ripple.y, ripple.progress, config);
     }
 }
 
@@ -107,12 +101,28 @@ fn draw_ring(
     let shadow_inner = (radius - shadow_width / 2.0).max(0.0);
     let shadow_outer = radius + shadow_width / 2.0;
     let shadow_color = Rgba([0, 0, 0, 150]); // Dark semi-transparent shadow
-    draw_ring_pixels(canvas, center_x, center_y, shadow_inner, shadow_outer, opacity * 0.6, &shadow_color);
+    draw_ring_pixels(
+        canvas,
+        center_x,
+        center_y,
+        shadow_inner,
+        shadow_outer,
+        opacity * 0.6,
+        &shadow_color,
+    );
 
     // Draw main ring on top
     let inner_radius = (radius - config.ring_width / 2.0).max(0.0);
     let outer_radius = radius + config.ring_width / 2.0;
-    draw_ring_pixels(canvas, center_x, center_y, inner_radius, outer_radius, opacity, &config.color);
+    draw_ring_pixels(
+        canvas,
+        center_x,
+        center_y,
+        inner_radius,
+        outer_radius,
+        opacity,
+        &config.color,
+    );
 }
 
 /// Draw ring pixels with given radii and color
@@ -238,10 +248,7 @@ mod tests {
     #[test]
     fn test_multiple_overlapping_ripples() {
         let config = ClickHighlightConfig::default();
-        let events = vec![
-            make_click(100.0, 100.0, 1.0),
-            make_click(200.0, 200.0, 1.2),
-        ];
+        let events = vec![make_click(100.0, 100.0, 1.0), make_click(200.0, 200.0, 1.2)];
 
         // At 1.3s: first click at 0.3s progress, second at 0.1s progress
         let ripples = get_active_ripples(1.3, &events, &config);

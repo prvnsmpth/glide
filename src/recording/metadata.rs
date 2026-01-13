@@ -1,4 +1,4 @@
-use crate::macos::event_tap::CursorEvent;
+use crate::cursor_types::CursorEvent;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -47,7 +47,14 @@ impl RecordingMetadata {
         }
     }
 
-    pub fn new_window(window_id: u32, width: u32, height: u32, offset_x: i32, offset_y: i32, scale_factor: f64) -> Self {
+    pub fn new_window(
+        window_id: u32,
+        width: u32,
+        height: u32,
+        offset_x: i32,
+        offset_y: i32,
+        scale_factor: f64,
+    ) -> Self {
         Self {
             source_type: SourceType::Window,
             source_index: window_id as usize,

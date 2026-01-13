@@ -4,8 +4,8 @@ use core_foundation::dictionary::CFDictionaryRef;
 use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
 use core_graphics::window::{
-    kCGNullWindowID, kCGWindowListExcludeDesktopElements,
-    kCGWindowListOptionOnScreenOnly, CGWindowListCopyWindowInfo,
+    kCGNullWindowID, kCGWindowListExcludeDesktopElements, kCGWindowListOptionOnScreenOnly,
+    CGWindowListCopyWindowInfo,
 };
 
 pub struct WindowInfo {

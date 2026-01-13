@@ -1,4 +1,4 @@
-use crate::macos::event_tap::CursorEvent;
+use crate::cursor_types::CursorEvent;
 use crate::processing::effects::blend_channel;
 use image::RgbaImage;
 use std::sync::OnceLock;
@@ -222,7 +222,7 @@ pub fn draw_cursor(canvas: &mut RgbaImage, x: f64, y: f64, scale: f64, opacity: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::macos::event_tap::EventType;
+    use crate::cursor_types::EventType;
 
     fn make_move(x: f64, y: f64, timestamp: f64) -> CursorEvent {
         CursorEvent {

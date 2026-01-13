@@ -1,36 +1,20 @@
-//! Linux X11 cursor tracking using RECORD extension or polling fallback
+//! Linux X11 cursor tracking using polling
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use x11rb::connection::Connection;
-use x11rb::protocol::xproto::{ButtonPressEvent, ConnectionExt, MotionNotifyEvent, Window};
-use x11rb::protocol::record::{self, ConnectionExt as RecordExt, Range8, Range16, ExtRange, CS, Context};
+use x11rb::protocol::xproto::ConnectionExt;
 use x11rb::rust_connection::RustConnection;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum EventType {
-    Move,
-    LeftClick,
-    RightClick,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CursorEvent {
-    pub x: f64,
-    pub y: f64,
-    pub timestamp: f64,
-    pub event_type: EventType,
-}
+use crate::cursor_types::{CursorEvent, EventType};
 
 pub struct CursorTracker {
     events: Arc<Mutex<Vec<CursorEvent>>>,
     start_time: Instant,
-    stop_tx: Option<Sender<()>>,
+    stop_flag: Arc<AtomicBool>,
     thread_handle: Option<thread::JoinHandle<()>>,
 }
 
@@ -39,25 +23,21 @@ impl CursorTracker {
         Self {
             events: Arc::new(Mutex::new(Vec::new())),
             start_time: Instant::now(),
-            stop_tx: None,
+            stop_flag: Arc::new(AtomicBool::new(false)),
             thread_handle: None,
         }
     }
 
     pub fn start(&mut self) -> Result<()> {
         self.start_time = Instant::now();
+        self.stop_flag.store(false, Ordering::SeqCst);
 
         let events = Arc::clone(&self.events);
         let start_time = self.start_time;
-        let (stop_tx, stop_rx) = mpsc::channel();
-        self.stop_tx = Some(stop_tx);
+        let stop_flag = Arc::clone(&self.stop_flag);
 
         let handle = thread::spawn(move || {
-            // Try RECORD extension first, fall back to polling
-            if let Err(e) = run_record_tracking(events.clone(), start_time, &stop_rx) {
-                eprintln!("RECORD extension failed ({}), falling back to polling", e);
-                run_polling_tracking(events, start_time, stop_rx);
-            }
+            run_polling_tracking(events, start_time, stop_flag);
         });
 
         self.thread_handle = Some(handle);
@@ -67,12 +47,20 @@ impl CursorTracker {
     pub fn stop(&mut self) -> (Vec<CursorEvent>, f64) {
         let duration = self.start_time.elapsed().as_secs_f64();
 
-        if let Some(tx) = self.stop_tx.take() {
-            let _ = tx.send(());
-        }
+        // Signal the thread to stop
+        self.stop_flag.store(true, Ordering::SeqCst);
 
+        // Wait for thread with timeout
         if let Some(handle) = self.thread_handle.take() {
-            let _ = handle.join();
+            // Give it 500ms to stop gracefully
+            let start = Instant::now();
+            while !handle.is_finished() && start.elapsed() < Duration::from_millis(500) {
+                thread::sleep(Duration::from_millis(10));
+            }
+            if handle.is_finished() {
+                let _ = handle.join();
+            }
+            // If not finished, just abandon the thread
         }
 
         let events = self.events.lock().unwrap();
@@ -80,104 +68,11 @@ impl CursorTracker {
     }
 }
 
-/// Try to use RECORD extension for efficient event tracking
-fn run_record_tracking(
-    events: Arc<Mutex<Vec<CursorEvent>>>,
-    start_time: Instant,
-    stop_rx: &Receiver<()>,
-) -> Result<()> {
-    // We need two connections for RECORD: one for control, one for data
-    let (ctrl_conn, _) = RustConnection::connect(None)?;
-    let (data_conn, screen_num) = RustConnection::connect(None)?;
-
-    // Query RECORD extension
-    let _record_query = ctrl_conn.record_query_version(1, 13)?.reply()?;
-
-    // Create record context to capture pointer events
-    let ctx = ctrl_conn.generate_id()?;
-
-    // Set up range to capture core pointer events
-    let range = ExtRange {
-        major: Range8 { first: 0, last: 0 },
-        minor: Range16 { first: 0, last: 0 },
-    };
-
-    let client_spec = CS::ALL_CLIENTS;
-
-    // Create the record context
-    ctrl_conn.record_create_context(
-        ctx,
-        0,
-        &[client_spec],
-        &[record::Range {
-            core_requests: Range8 { first: 0, last: 0 },
-            core_replies: Range8 { first: 0, last: 0 },
-            ext_requests: range,
-            ext_replies: range,
-            delivered_events: Range8 { first: 0, last: 0 },
-            device_events: Range8 { first: 6, last: 6 }, // MotionNotify = 6
-            errors: Range8 { first: 0, last: 0 },
-            client_started: false,
-            client_died: false,
-        }, record::Range {
-            core_requests: Range8 { first: 0, last: 0 },
-            core_replies: Range8 { first: 0, last: 0 },
-            ext_requests: range,
-            ext_replies: range,
-            delivered_events: Range8 { first: 0, last: 0 },
-            device_events: Range8 { first: 4, last: 5 }, // ButtonPress = 4, ButtonRelease = 5
-            errors: Range8 { first: 0, last: 0 },
-            client_started: false,
-            client_died: false,
-        }],
-    )?.check()?;
-
-    // Enable the context (this blocks until disabled)
-    // We need to run this in a separate thread because it blocks
-    let events_clone = Arc::clone(&events);
-    let running = Arc::new(AtomicBool::new(true));
-    let running_clone = Arc::clone(&running);
-
-    let record_thread = thread::spawn(move || {
-        // Use data_conn to receive events
-        if let Ok(()) = data_conn.record_enable_context(ctx).map(|_| ()) {
-            // Process events until stopped
-            while running_clone.load(Ordering::Relaxed) {
-                // Note: This simplified implementation doesn't fully parse RECORD data
-                // In practice, you'd need to properly parse the intercepted data
-                thread::sleep(Duration::from_millis(10));
-            }
-        }
-    });
-
-    // Wait for stop signal
-    while stop_rx.try_recv().is_err() {
-        thread::sleep(Duration::from_millis(50));
-    }
-
-    running.store(false, Ordering::SeqCst);
-
-    // Disable and free the context
-    let _ = ctrl_conn.record_disable_context(ctx);
-    let _ = ctrl_conn.record_free_context(ctx);
-
-    let _ = record_thread.join();
-
-    // If we got here but have no events, the RECORD approach didn't work well
-    // Return an error to trigger fallback
-    let event_count = events_clone.lock().unwrap().len();
-    if event_count == 0 {
-        anyhow::bail!("RECORD extension captured no events");
-    }
-
-    Ok(())
-}
-
-/// Fallback: poll cursor position using XQueryPointer
+/// Poll cursor position using XQueryPointer
 fn run_polling_tracking(
     events: Arc<Mutex<Vec<CursorEvent>>>,
     start_time: Instant,
-    stop_rx: Receiver<()>,
+    stop_flag: Arc<AtomicBool>,
 ) {
     let Ok((conn, screen_num)) = RustConnection::connect(None) else {
         eprintln!("Failed to connect to X11 display for cursor tracking");
@@ -197,12 +92,16 @@ fn run_polling_tracking(
 
     loop {
         // Check for stop signal
-        if stop_rx.try_recv().is_ok() {
+        if stop_flag.load(Ordering::Relaxed) {
             break;
         }
 
         // Query pointer position and button state
-        let Ok(reply) = conn.query_pointer(root).and_then(|cookie| cookie.reply()) else {
+        let Some(reply) = conn
+            .query_pointer(root)
+            .ok()
+            .and_then(|cookie| cookie.reply().ok())
+        else {
             thread::sleep(poll_interval);
             continue;
         };

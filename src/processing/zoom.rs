@@ -1,22 +1,22 @@
-use crate::macos::event_tap::{CursorEvent, EventType};
+use crate::cursor_types::{CursorEvent, EventType};
 
 /// Zoom configuration
 pub struct ZoomConfig {
-    pub max_zoom: f64,  // Target zoom level
-    pub ease_in: f64,   // Ease in duration (anticipatory - starts before click)
-    pub hold: f64,      // Hold duration at max zoom; also determines panning behavior
-    pub ease_out: f64,  // Ease out duration
-    pub debounce: f64,  // Ignore clicks within this time of previous click
+    pub max_zoom: f64, // Target zoom level
+    pub ease_in: f64,  // Ease in duration (anticipatory - starts before click)
+    pub hold: f64,     // Hold duration at max zoom; also determines panning behavior
+    pub ease_out: f64, // Ease out duration
+    pub debounce: f64, // Ignore clicks within this time of previous click
 }
 
 impl Default for ZoomConfig {
     fn default() -> Self {
         Self {
-            max_zoom: 1.8,  // More prominent zoom for better visibility
-            ease_in: 0.6,   // Anticipatory zoom starts 0.6s before click
-            hold: 4.0,      // Hold duration at max zoom
-            ease_out: 0.8,  // Slow zoom out
-            debounce: 0.5,  // Ignore clicks within 0.5s of previous
+            max_zoom: 1.8, // More prominent zoom for better visibility
+            ease_in: 0.6,  // Anticipatory zoom starts 0.6s before click
+            hold: 4.0,     // Hold duration at max zoom
+            ease_out: 0.8, // Slow zoom out
+            debounce: 0.5, // Ignore clicks within 0.5s of previous
         }
     }
 }
@@ -104,7 +104,8 @@ pub fn calculate_zoom(
 
                 // During pan phase: interpolate from prev to next
                 // Pan starts after hold ends OR when we're within ease_in of next click
-                let pan_start_time = (prev.timestamp + config.hold).min(next.timestamp - config.ease_in);
+                let pan_start_time =
+                    (prev.timestamp + config.hold).min(next.timestamp - config.ease_in);
                 if timestamp >= pan_start_time {
                     let pan_duration = next.timestamp - pan_start_time;
                     let pan_elapsed = timestamp - pan_start_time;
@@ -137,7 +138,10 @@ pub fn calculate_zoom(
 }
 
 /// Get all effective clicks (filtered by debounce)
-fn get_effective_clicks<'a>(events: &'a [CursorEvent], config: &ZoomConfig) -> Vec<&'a CursorEvent> {
+fn get_effective_clicks<'a>(
+    events: &'a [CursorEvent],
+    config: &ZoomConfig,
+) -> Vec<&'a CursorEvent> {
     let clicks: Vec<_> = events
         .iter()
         .filter(|e| matches!(e.event_type, EventType::LeftClick | EventType::RightClick))
@@ -246,10 +250,7 @@ mod tests {
         let config = ZoomConfig::default();
         // Pan window = hold + ease_out + ease_in = 4.0 + 0.8 + 0.6 = 5.4s
         // Two clicks 4.0s apart (within pan window)
-        let events = vec![
-            make_click(100.0, 100.0, 1.0),
-            make_click(200.0, 200.0, 5.0),
-        ];
+        let events = vec![make_click(100.0, 100.0, 1.0), make_click(200.0, 200.0, 5.0)];
 
         // At first click: max zoom at first position
         let (zoom, x, _) = calculate_zoom(1.0, &events, &config);
@@ -273,10 +274,7 @@ mod tests {
             (zoom - config.max_zoom).abs() < 0.01,
             "Should stay at max zoom during pan"
         );
-        assert!(
-            x > 100.0 && x < 200.0,
-            "Should be interpolating x position"
-        );
+        assert!(x > 100.0 && x < 200.0, "Should be interpolating x position");
 
         // At second click: max zoom at second position
         let (zoom, x, y) = calculate_zoom(5.0, &events, &config);
@@ -304,22 +302,25 @@ mod tests {
 
         // Before second click's anticipatory zoom
         let (zoom, _, _) = calculate_zoom(10.0, &events, &config);
-        assert!((zoom - 1.0).abs() < 0.01, "Should be idle before second click");
+        assert!(
+            (zoom - 1.0).abs() < 0.01,
+            "Should be idle before second click"
+        );
 
         // During anticipatory zoom to second click
         let (zoom, x, _) = calculate_zoom(10.6, &events, &config);
         assert!(zoom > 1.0, "Should be zooming in to second click");
-        assert!((x - 200.0).abs() < 0.01, "Should target second click position");
+        assert!(
+            (x - 200.0).abs() < 0.01,
+            "Should target second click position"
+        );
     }
 
     #[test]
     fn test_double_click_debounce() {
         let config = ZoomConfig::default();
         // Two clicks 0.1s apart (within debounce of 0.5s)
-        let events = vec![
-            make_click(100.0, 100.0, 1.0),
-            make_click(150.0, 150.0, 1.1),
-        ];
+        let events = vec![make_click(100.0, 100.0, 1.0), make_click(150.0, 150.0, 1.1)];
 
         let effective = get_effective_clicks(&events, &config);
         assert_eq!(effective.len(), 1, "Second click should be debounced");

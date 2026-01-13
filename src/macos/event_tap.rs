@@ -127,7 +127,9 @@ fn run_event_tap(events: Arc<Mutex<Vec<CursorEvent>>>, start_time: Instant, stop
     let tap = match tap {
         Ok(t) => t,
         Err(()) => {
-            eprintln!("Failed to create event tap. Make sure Accessibility permissions are granted.");
+            eprintln!(
+                "Failed to create event tap. Make sure Accessibility permissions are granted."
+            );
             return;
         }
     };

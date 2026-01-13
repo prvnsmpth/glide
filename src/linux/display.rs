@@ -3,7 +3,6 @@
 use anyhow::{Context, Result};
 use x11rb::connection::Connection;
 use x11rb::protocol::randr::{self, ConnectionExt as RandrExt};
-use x11rb::protocol::xproto::ConnectionExt;
 use x11rb::rust_connection::RustConnection;
 
 pub struct DisplayInfo {
@@ -19,8 +18,8 @@ pub struct DisplayInfo {
 }
 
 pub fn list_displays() -> Result<Vec<DisplayInfo>> {
-    let (conn, screen_num) = RustConnection::connect(None)
-        .context("Failed to connect to X11 display")?;
+    let (conn, screen_num) =
+        RustConnection::connect(None).context("Failed to connect to X11 display")?;
 
     let setup = conn.setup();
     let screen = &setup.roots[screen_num];
@@ -51,14 +50,11 @@ pub fn list_displays() -> Result<Vec<DisplayInfo>> {
 
         // Check if any output is connected
         let has_connected_output = crtc_info.outputs.iter().any(|output| {
-            if let Ok(output_info) = conn
-                .randr_get_output_info(*output, resources.config_timestamp)
-                .and_then(|cookie| cookie.reply())
-            {
-                output_info.connection == randr::Connection::CONNECTED
-            } else {
-                false
-            }
+            conn.randr_get_output_info(*output, resources.config_timestamp)
+                .ok()
+                .and_then(|cookie| cookie.reply().ok())
+                .map(|output_info| output_info.connection == randr::Connection::CONNECTED)
+                .unwrap_or(false)
         });
 
         if !has_connected_output {

@@ -2,9 +2,7 @@
 
 use anyhow::{Context, Result};
 use x11rb::connection::Connection;
-use x11rb::protocol::xproto::{
-    Atom, AtomEnum, ConnectionExt, GetPropertyReply, Window,
-};
+use x11rb::protocol::xproto::{Atom, AtomEnum, ConnectionExt, GetPropertyReply, Window};
 use x11rb::rust_connection::RustConnection;
 
 pub struct WindowInfo {
@@ -59,7 +57,12 @@ fn get_window_name(conn: &RustConnection, window: Window) -> Result<String> {
     }
 
     // Fall back to WM_NAME
-    if let Ok(Some(reply)) = get_property_value(conn, window, AtomEnum::WM_NAME.into(), AtomEnum::STRING.into()) {
+    if let Ok(Some(reply)) = get_property_value(
+        conn,
+        window,
+        AtomEnum::WM_NAME.into(),
+        AtomEnum::STRING.into(),
+    ) {
         if let Ok(name) = String::from_utf8(reply.value) {
             return Ok(name);
         }
@@ -70,7 +73,12 @@ fn get_window_name(conn: &RustConnection, window: Window) -> Result<String> {
 
 /// Get WM_CLASS (application name/class)
 fn get_wm_class(conn: &RustConnection, window: Window) -> Result<String> {
-    if let Ok(Some(reply)) = get_property_value(conn, window, AtomEnum::WM_CLASS.into(), AtomEnum::STRING.into()) {
+    if let Ok(Some(reply)) = get_property_value(
+        conn,
+        window,
+        AtomEnum::WM_CLASS.into(),
+        AtomEnum::STRING.into(),
+    ) {
         // WM_CLASS contains two null-terminated strings: instance name and class name
         // We want the class name (second one) as it's typically the application name
         let parts: Vec<&[u8]> = reply.value.split(|&b| b == 0).collect();
@@ -121,8 +129,8 @@ fn get_window_geometry(
 }
 
 pub fn list_windows() -> Result<Vec<WindowInfo>> {
-    let (conn, screen_num) = RustConnection::connect(None)
-        .context("Failed to connect to X11 display")?;
+    let (conn, screen_num) =
+        RustConnection::connect(None).context("Failed to connect to X11 display")?;
 
     let setup = conn.setup();
     let screen = &setup.roots[screen_num];
@@ -137,7 +145,10 @@ pub fn list_windows() -> Result<Vec<WindowInfo>> {
     let windows = match reply {
         Some(reply) => {
             // Convert bytes to window IDs (u32)
-            reply.value32().map(|iter| iter.collect::<Vec<_>>()).unwrap_or_default()
+            reply
+                .value32()
+                .map(|iter| iter.collect::<Vec<_>>())
+                .unwrap_or_default()
         }
         None => Vec::new(),
     };
